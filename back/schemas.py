@@ -19,3 +19,12 @@ class UserResponse(BaseModel):
 class PublicKeyResponse(BaseModel):
     user_id: int
     public_key_pem: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str

@@ -4,8 +4,8 @@ from sqlalchemy.exc import IntegrityError
 
 from database import get_db
 from models import User
-from schemas import UserRegister, UserResponse
-from crypto import hash_password, generate_key_pair
+from schemas import UserRegister, UserResponse, UserLogin, TokenResponse
+from crypto import hash_password, generate_key_pair, verify_password, create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -43,3 +43,32 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
         )
 
     return user
+
+
+@router.post("/login", response_model=TokenResponse)
+def login(payload: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas",
+        )
+
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas",
+        )
+
+    token = create_access_token(
+        data={
+            "sub": str(user.id),
+            "email": user.email,
+        }
+    )
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+    }
