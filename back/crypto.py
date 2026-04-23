@@ -1,11 +1,18 @@
 import os
 import base64
 import bcrypt
+import secrets
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+
+from dotenv import load_dotenv
+from jose import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.fernet import Fernet
 
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # ---------------------------------------------------------------------------
 # Password hashing — bcrypt
@@ -86,3 +93,21 @@ def decrypt_private_key(password: str, encrypted_private_key: str) -> bytes:
     pbkdf2_salt = base64.urlsafe_b64decode(salt_b64)
     fernet_key = _derive_fernet_key(password, pbkdf2_salt)
     return Fernet(fernet_key).decrypt(token.encode())
+
+
+# ---------------------------------------------------------------------------
+# JWT
+# ---------------------------------------------------------------------------
+
+SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
