@@ -28,3 +28,14 @@ class UserLogin(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+
+class MessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+
+
+class MessageResponse(BaseModel):
+    id: int
+    ciphertext: str
+    nonce: str
+
+    model_config = {"from_attributes": True}
