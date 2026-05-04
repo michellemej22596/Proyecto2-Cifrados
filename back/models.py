@@ -14,3 +14,11 @@ class User(Base):
     # Formato: "<base64_pbkdf2_salt>.<fernet_token>"
     encrypted_private_key = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ciphertext = Column(String, nullable=False)
+    nonce = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
