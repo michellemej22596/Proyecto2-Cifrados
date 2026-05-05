@@ -65,3 +65,39 @@ class MessageDecryptRequest(BaseModel):
 
 class MessageDecryptResponse(BaseModel):
     plaintext: str
+
+class GroupCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    member_ids: list[int]
+
+
+class GroupResponse(BaseModel):
+    id: int
+    name: str
+    owner_id: int
+
+    model_config = {"from_attributes": True}
+
+
+class GroupMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+    password: str
+
+
+class GroupMessageResponse(BaseModel):
+    id: int
+    group_id: int
+    sender_id: int
+    ciphertext: str
+    nonce: str
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class GroupMessageDecryptRequest(BaseModel):
+    password: str
+
+
+class GroupMessageDecryptResponse(BaseModel):
+    plaintext: str

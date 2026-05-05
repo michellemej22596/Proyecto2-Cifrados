@@ -166,14 +166,14 @@ if "token_type" not in st.session_state:
 # =========================
 # TABS
 # =========================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📝 Registro",
     "🔑 Login",
     "📨 Enviar mensaje",
     "📬 Ver mensajes",
     "🔓 Descifrar",
+    "👥 Grupos",
 ])
-
 # =========================
 # REGISTRO
 # =========================
@@ -546,6 +546,313 @@ with tab5:
                         st.error("No se pudo conectar con el backend.")
                     except Exception as e:
                         st.error(f"Error inesperado: {e}")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# =========================
+# MENSAJERÍA GRUPAL
+# =========================
+with tab6:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="badge">Requiere sesión activa</div>', unsafe_allow_html=True)
+    st.subheader("Mensajería grupal cifrada")
+    st.caption(
+        "Crea grupos, envía mensajes cifrados con una clave AES-256 compartida "
+        "y descifra mensajes usando tu contraseña."
+    )
+
+    if not st.session_state.get("access_token"):
+        st.warning("Inicia sesión en la pestaña **Login** para usar mensajería grupal.")
+    else:
+        group_tab1, group_tab2, group_tab3, group_tab4 = st.tabs([
+            "➕ Crear grupo",
+            "📤 Enviar",
+            "📥 Ver mensajes",
+            "🔓 Descifrar",
+        ])
+
+        headers = {
+            "Authorization": f"Bearer {st.session_state['access_token']}"
+        }
+
+        # -------------------------
+        # CREAR GRUPO
+        # -------------------------
+        with group_tab1:
+            st.markdown('<div class="mini-card">', unsafe_allow_html=True)
+            st.markdown("### Crear nuevo grupo")
+            st.caption(
+                "Ingresa el nombre del grupo y los IDs de los miembros separados por coma. "
+                "Tu usuario se agrega automáticamente al grupo."
+            )
+
+            with st.form("create_group_form"):
+                group_name = st.text_input(
+                    "Nombre del grupo",
+                    placeholder="Equipo Proyecto Cifrado"
+                )
+
+                member_ids_text = st.text_input(
+                    "IDs de miembros",
+                    placeholder="2, 3, 4"
+                )
+
+                create_group_submitted = st.form_submit_button("Crear grupo")
+
+            if create_group_submitted:
+                if not group_name.strip():
+                    st.error("El nombre del grupo no puede estar vacío.")
+                else:
+                    try:
+                        member_ids = []
+
+                        if member_ids_text.strip():
+                            member_ids = [
+                                int(x.strip())
+                                for x in member_ids_text.split(",")
+                                if x.strip()
+                            ]
+
+                        response = requests.post(
+                            f"{API_BASE}/groups/",
+                            json={
+                                "name": group_name,
+                                "member_ids": member_ids,
+                            },
+                            headers=headers,
+                            timeout=15,
+                        )
+
+                        if response.status_code == 201:
+                            data = response.json()
+                            st.success(f"Grupo creado correctamente. ID: **{data['id']}**")
+
+                            st.markdown("**Resumen del grupo**")
+                            st.write(f"**Nombre:** {data['name']}")
+                            st.write(f"**Owner ID:** {data['owner_id']}")
+                            st.write(f"**Group ID:** {data['id']}")
+
+                        elif response.status_code == 404:
+                            st.error("Uno o más usuarios no existen. Verifica los IDs.")
+                        elif response.status_code == 401:
+                            st.error("Sesión expirada. Vuelve a iniciar sesión.")
+                        elif response.status_code == 422:
+                            st.error("Datos inválidos. Revisa los IDs ingresados.")
+                        else:
+                            st.error(f"Error ({response.status_code}): {response.text}")
+
+                    except ValueError:
+                        st.error("Los IDs deben ser números separados por coma. Ejemplo: 2, 3, 4")
+                    except requests.exceptions.ConnectionError:
+                        st.error("No se pudo conectar con el backend.")
+                    except Exception as e:
+                        st.error(f"Error inesperado: {e}")
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # -------------------------
+        # ENVIAR MENSAJE GRUPAL
+        # -------------------------
+        with group_tab2:
+            st.markdown('<div class="mini-card">', unsafe_allow_html=True)
+            st.markdown("### Enviar mensaje al grupo")
+            st.caption(
+                "El mensaje se cifra con AES-256-GCM usando la clave compartida del grupo."
+            )
+
+            with st.form("send_group_message_form"):
+                send_group_id = st.number_input(
+                    "ID del grupo",
+                    min_value=1,
+                    step=1,
+                    key="send_group_id"
+                )
+
+                group_message_content = st.text_area(
+                    "Mensaje",
+                    placeholder="Escribe el mensaje grupal...",
+                    key="group_message_content"
+                )
+
+                group_password = st.text_input(
+                    "Tu contraseña",
+                    type="password",
+                    help="Se usa para desbloquear tu llave privada y recuperar la clave del grupo.",
+                    key="group_send_password"
+                )
+
+                send_group_message_submitted = st.form_submit_button("Cifrar y enviar")
+
+            if send_group_message_submitted:
+                if not group_message_content.strip():
+                    st.error("El mensaje no puede estar vacío.")
+                elif not group_password:
+                    st.error("Ingresa tu contraseña.")
+                else:
+                    try:
+                        response = requests.post(
+                            f"{API_BASE}/groups/{int(send_group_id)}/messages",
+                            json={
+                                "content": group_message_content,
+                                "password": group_password,
+                            },
+                            headers=headers,
+                            timeout=15,
+                        )
+
+                        if response.status_code == 201:
+                            data = response.json()
+                            st.success(f"Mensaje grupal enviado. ID: **{data['id']}**")
+
+                            st.markdown("**Detalles del mensaje cifrado**")
+                            st.write(f"**Grupo ID:** {data['group_id']}")
+                            st.write(f"**Remitente ID:** {data['sender_id']}")
+                            st.text(f"Ciphertext (Base64):\n{data['ciphertext']}")
+                            st.text(f"Nonce (Base64):\n{data['nonce']}")
+
+                        elif response.status_code == 403:
+                            st.error("No perteneces a este grupo.")
+                        elif response.status_code == 401:
+                            st.error("Contraseña incorrecta o sesión expirada.")
+                        elif response.status_code == 404:
+                            st.error("Grupo no encontrado.")
+                        elif response.status_code == 422:
+                            st.error("Datos inválidos.")
+                        else:
+                            st.error(f"Error ({response.status_code}): {response.text}")
+
+                    except requests.exceptions.ConnectionError:
+                        st.error("No se pudo conectar con el backend.")
+                    except Exception as e:
+                        st.error(f"Error inesperado: {e}")
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # -------------------------
+        # VER MENSAJES DEL GRUPO
+        # -------------------------
+        with group_tab3:
+            st.markdown('<div class="mini-card">', unsafe_allow_html=True)
+            st.markdown("### Ver mensajes cifrados del grupo")
+
+            view_group_id = st.number_input(
+                "ID del grupo",
+                min_value=1,
+                step=1,
+                key="view_group_id"
+            )
+
+            if st.button("Cargar mensajes del grupo"):
+                try:
+                    response = requests.get(
+                        f"{API_BASE}/groups/{int(view_group_id)}/messages",
+                        headers=headers,
+                        timeout=10,
+                    )
+
+                    if response.status_code == 200:
+                        messages = response.json()
+
+                        if not messages:
+                            st.info("Este grupo todavía no tiene mensajes.")
+                        else:
+                            st.write(f"**{len(messages)} mensaje(s) encontrado(s)**")
+
+                            for msg in messages:
+                                with st.expander(f"Mensaje grupal #{msg['id']}"):
+                                    st.write(f"**Grupo ID:** {msg['group_id']}")
+                                    st.write(f"**Remitente ID:** {msg['sender_id']}")
+                                    st.text(f"Ciphertext (Base64):\n{msg['ciphertext']}")
+                                    st.text(f"Nonce (Base64):\n{msg['nonce']}")
+
+                    elif response.status_code == 403:
+                        st.error("No perteneces a este grupo.")
+                    elif response.status_code == 401:
+                        st.error("Sesión expirada. Vuelve a iniciar sesión.")
+                    elif response.status_code == 404:
+                        st.error("Grupo no encontrado.")
+                    else:
+                        st.error(f"Error ({response.status_code}): {response.text}")
+
+                except requests.exceptions.ConnectionError:
+                    st.error("No se pudo conectar con el backend.")
+                except Exception as e:
+                    st.error(f"Error inesperado: {e}")
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # -------------------------
+        # DESCIFRAR MENSAJE GRUPAL
+        # -------------------------
+        with group_tab4:
+            st.markdown('<div class="mini-card">', unsafe_allow_html=True)
+            st.markdown("### Descifrar mensaje grupal")
+            st.caption(
+                "Solo los miembros del grupo pueden descifrar los mensajes usando su contraseña."
+            )
+
+            with st.form("decrypt_group_message_form"):
+                decrypt_group_id = st.number_input(
+                    "ID del grupo",
+                    min_value=1,
+                    step=1,
+                    key="decrypt_group_id"
+                )
+
+                decrypt_group_message_id = st.number_input(
+                    "ID del mensaje grupal",
+                    min_value=1,
+                    step=1,
+                    key="decrypt_group_message_id"
+                )
+
+                decrypt_group_password = st.text_input(
+                    "Tu contraseña",
+                    type="password",
+                    key="decrypt_group_password"
+                )
+
+                decrypt_group_submitted = st.form_submit_button("Descifrar mensaje grupal")
+
+            if decrypt_group_submitted:
+                if not decrypt_group_password:
+                    st.error("Ingresa tu contraseña.")
+                else:
+                    try:
+                        response = requests.post(
+                            f"{API_BASE}/groups/{int(decrypt_group_id)}/messages/{int(decrypt_group_message_id)}/decrypt",
+                            json={
+                                "password": decrypt_group_password,
+                            },
+                            headers=headers,
+                            timeout=15,
+                        )
+
+                        if response.status_code == 200:
+                            data = response.json()
+                            st.success("Mensaje grupal descifrado exitosamente.")
+                            st.markdown(
+                                f'<div class="plaintext-box">👥 {data["plaintext"]}</div>',
+                                unsafe_allow_html=True,
+                            )
+
+                        elif response.status_code == 403:
+                            st.error("No perteneces a este grupo.")
+                        elif response.status_code == 401:
+                            st.error("Contraseña incorrecta o sesión expirada.")
+                        elif response.status_code == 404:
+                            st.error("Grupo o mensaje no encontrado.")
+                        elif response.status_code == 400:
+                            st.error("No se pudo descifrar el mensaje grupal.")
+                        else:
+                            st.error(f"Error ({response.status_code}): {response.text}")
+
+                    except requests.exceptions.ConnectionError:
+                        st.error("No se pudo conectar con el backend.")
+                    except Exception as e:
+                        st.error(f"Error inesperado: {e}")
+
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 

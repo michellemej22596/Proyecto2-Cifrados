@@ -154,7 +154,7 @@ Autenticacion multifactor y despliegue containerizado.
 ```bash
 # Clonar el repositorio
 git clone https://github.com/michellemej22596/Proyecto2-Cifrados.git
-cd vaultchain
+cd Proyecto2-Cifrados
 
 # Crear entorno virtual
 python -m venv venv
@@ -166,7 +166,6 @@ pip install -r requirements.txt
 
 # Configurar variables de entorno
 cp .env.example .env
-# Editar .env con tus credenciales
 
 # Ejecutar migraciones
 alembic upgrade head
@@ -324,12 +323,21 @@ pytest tests/ --cov=src --cov-report=html
 
 ### Pruebas Implementadas
 
-| Categoria | Tests | Estado |
-|-----------|-------|--------|
-| Hashing de contrasenas | 5 | Completado |
-| Derivacion de claves PBKDF2 | 4 | Completado |
-| Generacion RSA-2048 | 6 | Completado |
-| Integracion | 2 | Completado |
+| Categoria | Tests | Estado
+|-----|-----|-----
+| Hashing de contraseñas | 5 | Completado
+| Derivacion de claves PBKDF2 | 4 | Completado
+| Generacion RSA-2048 | 6 | Completado
+| JWT (Access Tokens) | 4 | Completado
+| Cifrado AES-GCM | 5 | Completado
+| Cifrado RSA-OAEP | 3 | Completado
+| Cifrado Hibrido | 4 | Completado
+| Casos limite y seguridad | 4 | Completado
+| Integracion | 2 | Completado
+
+
+**Total: 37 tests**
+
 
 ---
 
