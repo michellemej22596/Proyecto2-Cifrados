@@ -68,7 +68,7 @@ class MessageDecryptResponse(BaseModel):
 
 class GroupCreate(BaseModel):
     name: str = Field(..., min_length=1)
-    member_ids: list[int]
+    member_names: list[str]
 
 
 class GroupResponse(BaseModel):

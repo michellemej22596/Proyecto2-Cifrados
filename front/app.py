@@ -575,14 +575,14 @@ with tab6:
             "Authorization": f"Bearer {st.session_state['access_token']}"
         }
 
-        # -------------------------
+                # -------------------------
         # CREAR GRUPO
         # -------------------------
         with group_tab1:
             st.markdown('<div class="mini-card">', unsafe_allow_html=True)
             st.markdown("### Crear nuevo grupo")
             st.caption(
-                "Ingresa el nombre del grupo y los IDs de los miembros separados por coma. "
+                "Ingresa el nombre del grupo y los nombres de usuario separados por coma. "
                 "Tu usuario se agrega automáticamente al grupo."
             )
 
@@ -592,9 +592,9 @@ with tab6:
                     placeholder="Equipo Proyecto Cifrado"
                 )
 
-                member_ids_text = st.text_input(
-                    "IDs de miembros",
-                    placeholder="2, 3, 4"
+                member_names_text = st.text_input(
+                    "Nombres de miembros",
+                    placeholder="Michelle, Daniela, Carlos"
                 )
 
                 create_group_submitted = st.form_submit_button("Crear grupo")
@@ -604,20 +604,20 @@ with tab6:
                     st.error("El nombre del grupo no puede estar vacío.")
                 else:
                     try:
-                        member_ids = []
+                        member_names = []
 
-                        if member_ids_text.strip():
-                            member_ids = [
-                                int(x.strip())
-                                for x in member_ids_text.split(",")
-                                if x.strip()
+                        if member_names_text.strip():
+                            member_names = [
+                                name.strip()
+                                for name in member_names_text.split(",")
+                                if name.strip()
                             ]
 
                         response = requests.post(
                             f"{API_BASE}/groups/",
                             json={
                                 "name": group_name,
-                                "member_ids": member_ids,
+                                "member_names": member_names,
                             },
                             headers=headers,
                             timeout=15,
@@ -633,23 +633,21 @@ with tab6:
                             st.write(f"**Group ID:** {data['id']}")
 
                         elif response.status_code == 404:
-                            st.error("Uno o más usuarios no existen. Verifica los IDs.")
+                            st.error("Uno o más usuarios no existen. Verifica los nombres ingresados.")
                         elif response.status_code == 401:
                             st.error("Sesión expirada. Vuelve a iniciar sesión.")
                         elif response.status_code == 422:
-                            st.error("Datos inválidos. Revisa los IDs ingresados.")
+                            st.error("Datos inválidos. Revisa los nombres ingresados.")
                         else:
                             st.error(f"Error ({response.status_code}): {response.text}")
 
-                    except ValueError:
-                        st.error("Los IDs deben ser números separados por coma. Ejemplo: 2, 3, 4")
                     except requests.exceptions.ConnectionError:
                         st.error("No se pudo conectar con el backend.")
                     except Exception as e:
                         st.error(f"Error inesperado: {e}")
 
             st.markdown('</div>', unsafe_allow_html=True)
-
+            
         # -------------------------
         # ENVIAR MENSAJE GRUPAL
         # -------------------------

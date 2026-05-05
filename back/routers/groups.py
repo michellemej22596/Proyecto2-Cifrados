@@ -158,16 +158,22 @@ def create_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    member_ids = set(payload.member_ids)
-    member_ids.add(current_user.id)
+    member_names = set(payload.member_names)
 
-    users = db.query(User).filter(User.id.in_(member_ids)).all()
+    users = db.query(User).filter(User.name.in_(member_names)).all()
 
-    if len(users) != len(member_ids):
+    if len(users) != len(member_names):
+        found_names = {user.name for user in users}
+        missing_names = member_names - found_names
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Uno o más usuarios no existen",
+            detail=f"No se encontraron estos usuarios: {', '.join(missing_names)}",
         )
+
+    # agregar siempre al usuario actual
+    if current_user not in users:
+        users.append(current_user)
 
     group = Group(
         name=payload.name,
