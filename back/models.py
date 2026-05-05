@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from database import Base
 
@@ -19,6 +19,9 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     ciphertext = Column(String, nullable=False)
+    encrypted_key = Column(String, nullable=True)
     nonce = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

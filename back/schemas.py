@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -31,11 +32,24 @@ class TokenResponse(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
+    recipient_id: int
+
+
+class MessageDecryptRequest(BaseModel):
+    password: str
+
+
+class MessageDecryptResponse(BaseModel):
+    plaintext: str
 
 
 class MessageResponse(BaseModel):
     id: int
+    sender_id: int | None = None
+    recipient_id: int | None = None
     ciphertext: str
+    encrypted_key: str | None = None
     nonce: str
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
