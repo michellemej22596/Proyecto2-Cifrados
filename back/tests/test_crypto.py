@@ -1,20 +1,38 @@
 """
 Pruebas unitarias para el módulo crypto
 """
-
+import os
+import base64
 import pytest
+from datetime import timedelta
+from jose import jwt
 import sys
 sys.path.insert(0, '..')
 
 from crypto import (
+    # Hashing
     hash_password,
     verify_password,
+    # Key derivation
+    #derive_key_from_password,
+    PBKDF2_ITERATIONS,
+    _derive_fernet_key,
+    # RSA
     generate_key_pair,
     decrypt_private_key,
-    _derive_fernet_key,
-    PBKDF2_ITERATIONS,
+    encrypt_aes_key_rsa_oaep,
+    decrypt_aes_key_rsa_oaep,
+    # AES-GCM
+    encrypt_message_aes_gcm,
+    decrypt_message_aes_gcm,
+    # Hybrid
+    encrypt_message_hybrid,
+    decrypt_message_hybrid,
+    # JWT
+    create_access_token,
+    SECRET_KEY,
+    ALGORITHM,
 )
-
 
 class TestPasswordHashing:
     """Pruebas para el hashing de contraseñas con bcrypt."""
@@ -202,6 +220,229 @@ class TestIntegration:
         # Verificar nuevo hash
         assert verify_password(new_password, new_hash) is True
         assert verify_password(old_password, new_hash) is False
+
+
+class TestJWT:
+    """Pruebas para la generación de tokens JWT."""
+
+    def test_create_access_token_returns_string(self):
+        """El token JWT debe ser un string válido."""
+        data = {"sub": "user_123", "role": "admin"}
+        token = create_access_token(data)
+        assert isinstance(token, str)
+        assert len(token) > 0
+
+    def test_create_access_token_is_decodable(self):
+        """El token debe poder decodificarse con la misma clave."""
+        from jose import jwt
+        from crypto import SECRET_KEY, ALGORITHM
+
+        data = {"sub": "user_456"}
+        token = create_access_token(data)
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        assert decoded["sub"] == "user_456"
+
+    def test_create_access_token_with_custom_expiry(self):
+        """Debe respetar el tiempo de expiración personalizado."""
+        from datetime import timedelta
+
+        data = {"sub": "user_789"}
+        token = create_access_token(data, expires_delta=timedelta(minutes=5))
+        assert isinstance(token, str)
+
+    def test_create_access_token_contains_exp_claim(self):
+        """El token debe incluir el claim 'exp'."""
+        from jose import jwt
+        from crypto import SECRET_KEY, ALGORITHM
+
+        token = create_access_token({"sub": "test"})
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        assert "exp" in decoded
+
+
+class TestAESGCM:
+    """Pruebas para cifrado simétrico AES-GCM."""
+
+    def test_encrypt_message_returns_tuple(self):
+        """encrypt_message_aes_gcm debe retornar (ciphertext, nonce)."""
+        plaintext = "Mensaje secreto"
+        result = encrypt_message_aes_gcm(plaintext)
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+    def test_encrypt_decrypt_roundtrip(self):
+        """El mensaje descifrado debe coincidir con el original."""
+        plaintext = "Texto de prueba para cifrar"
+        ciphertext, nonce = encrypt_message_aes_gcm(plaintext)
+        decrypted = decrypt_message_aes_gcm(ciphertext, nonce)
+
+        assert decrypted == plaintext
+
+    def test_encrypt_produces_different_ciphertext(self):
+        """Cada cifrado debe generar un ciphertext diferente (nonce único)."""
+        plaintext = "Mismo mensaje"
+        ct1, nonce1 = encrypt_message_aes_gcm(plaintext)
+        ct2, nonce2 = encrypt_message_aes_gcm(plaintext)
+
+        assert ct1 != ct2
+        assert nonce1 != nonce2
+
+    def test_decrypt_with_wrong_nonce_fails(self):
+        """Descifrar con nonce incorrecto debe fallar."""
+        plaintext = "Mensaje"
+        ciphertext, _ = encrypt_message_aes_gcm(plaintext)
+        wrong_nonce = base64.urlsafe_b64encode(os.urandom(12)).decode()
+
+        with pytest.raises(Exception):
+            decrypt_message_aes_gcm(ciphertext, wrong_nonce)
+
+    def test_encrypt_unicode_message(self):
+        """Debe manejar mensajes con caracteres unicode."""
+        plaintext = "Mensaje con ñ, émojis 🔐 y 日本語"
+        ciphertext, nonce = encrypt_message_aes_gcm(plaintext)
+        decrypted = decrypt_message_aes_gcm(ciphertext, nonce)
+
+        assert decrypted == plaintext
+
+
+class TestRSAOAEP:
+    """Pruebas para cifrado de claves AES con RSA-OAEP."""
+
+    def test_encrypt_aes_key_returns_string(self):
+        """encrypt_aes_key_rsa_oaep debe retornar un string base64."""
+        public_key, _ = generate_key_pair("password")
+        aes_key = os.urandom(32)
+
+        encrypted = encrypt_aes_key_rsa_oaep(public_key, aes_key)
+
+        assert isinstance(encrypted, str)
+        assert len(encrypted) > 0
+
+    def test_encrypt_decrypt_aes_key_roundtrip(self):
+        """La clave AES descifrada debe coincidir con la original."""
+        password = "test_password"
+        public_key, encrypted_private = generate_key_pair(password)
+        private_key = decrypt_private_key(password, encrypted_private)
+
+        original_aes_key = os.urandom(32)
+        encrypted_key = encrypt_aes_key_rsa_oaep(public_key, original_aes_key)
+        decrypted_key = decrypt_aes_key_rsa_oaep(private_key, encrypted_key)
+
+        assert decrypted_key == original_aes_key
+
+    def test_decrypt_with_wrong_private_key_fails(self):
+        """Descifrar con llave privada incorrecta debe fallar."""
+        public_key1, _ = generate_key_pair("password1")
+        _, encrypted_private2 = generate_key_pair("password2")
+        private_key2 = decrypt_private_key("password2", encrypted_private2)
+
+        aes_key = os.urandom(32)
+        encrypted = encrypt_aes_key_rsa_oaep(public_key1, aes_key)
+
+        with pytest.raises(Exception):
+            decrypt_aes_key_rsa_oaep(private_key2, encrypted)
+
+
+class TestHybridEncryption:
+    """Pruebas para cifrado híbrido RSA-OAEP + AES-GCM."""
+
+    def test_encrypt_message_hybrid_returns_dict(self):
+        """encrypt_message_hybrid debe retornar un dict con las claves correctas."""
+        public_key, _ = generate_key_pair("password")
+        plaintext = "Mensaje híbrido"
+
+        result = encrypt_message_hybrid(plaintext, public_key)
+
+        assert isinstance(result, dict)
+        assert "ciphertext" in result
+        assert "nonce" in result
+        assert "encrypted_key" in result
+
+    def test_hybrid_encrypt_decrypt_roundtrip(self):
+        """El flujo completo de cifrado/descifrado híbrido debe funcionar."""
+        password = "recipient_password"
+        public_key, encrypted_private = generate_key_pair(password)
+        private_key = decrypt_private_key(password, encrypted_private)
+
+        plaintext = "Mensaje confidencial para el destinatario"
+        encrypted = encrypt_message_hybrid(plaintext, public_key)
+
+        decrypted = decrypt_message_hybrid(
+            private_key,
+            encrypted["encrypted_key"],
+            encrypted["ciphertext"],
+            encrypted["nonce"],
+        )
+
+        assert decrypted == plaintext
+
+    def test_hybrid_encryption_different_outputs(self):
+        """Cada cifrado debe producir resultados diferentes."""
+        public_key, _ = generate_key_pair("password")
+        plaintext = "Mismo mensaje"
+
+        enc1 = encrypt_message_hybrid(plaintext, public_key)
+        enc2 = encrypt_message_hybrid(plaintext, public_key)
+
+        assert enc1["ciphertext"] != enc2["ciphertext"]
+        assert enc1["encrypted_key"] != enc2["encrypted_key"]
+
+    def test_hybrid_with_unicode_message(self):
+        """Debe funcionar con mensajes unicode."""
+        password = "pass"
+        public_key, encrypted_private = generate_key_pair(password)
+        private_key = decrypt_private_key(password, encrypted_private)
+
+        plaintext = "Mensaje con émojis 🔑🔒 y caracteres especiales ñáéíóú"
+        encrypted = encrypt_message_hybrid(plaintext, public_key)
+        decrypted = decrypt_message_hybrid(
+            private_key,
+            encrypted["encrypted_key"],
+            encrypted["ciphertext"],
+            encrypted["nonce"],
+        )
+
+        assert decrypted == plaintext
+
+
+class TestSecurityEdgeCases:
+    """Pruebas de seguridad y casos límite."""
+
+    def test_empty_password_handling(self):
+        """Debe manejar contraseñas vacías (aunque no recomendado)."""
+        password = ""
+        hashed = hash_password(password)
+        assert verify_password(password, hashed) is True
+
+    def test_very_long_password(self):
+        """Debe manejar contraseñas muy largas."""
+        password = "a" * 1000
+        hashed = hash_password(password)
+        assert verify_password(password, hashed) is True
+
+    def test_empty_message_encryption(self):
+        """Debe cifrar mensajes vacíos."""
+        ciphertext, nonce = encrypt_message_aes_gcm("")
+        decrypted = decrypt_message_aes_gcm(ciphertext, nonce)
+        assert decrypted == ""
+
+    def test_large_message_hybrid_encryption(self):
+        """Debe manejar mensajes grandes."""
+        password = "pass"
+        public_key, encrypted_private = generate_key_pair(password)
+        private_key = decrypt_private_key(password, encrypted_private)
+
+        plaintext = "X" * 100_000  # 100KB
+        encrypted = encrypt_message_hybrid(plaintext, public_key)
+        decrypted = decrypt_message_hybrid(
+            private_key,
+            encrypted["encrypted_key"],
+            encrypted["ciphertext"],
+            encrypted["nonce"],
+        )
+
+        assert decrypted == plaintext
 
 
 if __name__ == "__main__":
