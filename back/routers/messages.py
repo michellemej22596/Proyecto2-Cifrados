@@ -8,12 +8,15 @@ from models import Message, User
 from schemas import (
     MessageCreate,
     MessageResponse,
+    HybridMessageCreate,
+    HybridMessageResponse,
     MessageDecryptRequest,
     MessageDecryptResponse,
 )
 from crypto import (
     SECRET_KEY,
     ALGORITHM,
+    encrypt_message_aes_gcm,
     decrypt_private_key,
     encrypt_message_hybrid,
     decrypt_message_hybrid,
@@ -47,9 +50,38 @@ def get_current_user(
     return user
 
 
-@router.post("/", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-def create_message(
-    payload: MessageCreate,
+# ---------------------------------------------------------------------------
+# Endpoints originales — cifrado AES-256-GCM con clave compartida
+# ---------------------------------------------------------------------------
+
+@router.post("/", response_model=MessageResponse)
+def create_message(payload: MessageCreate, db: Session = Depends(get_db)):
+    ciphertext, nonce = encrypt_message_aes_gcm(payload.content)
+
+    message = Message(
+        ciphertext=ciphertext,
+        nonce=nonce,
+    )
+
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+    return message
+
+
+@router.get("/", response_model=list[MessageResponse])
+def get_messages(db: Session = Depends(get_db)):
+    return db.query(Message).all()
+
+
+# ---------------------------------------------------------------------------
+# Endpoints híbridos — cifrado RSA-OAEP + AES-256-GCM efímero
+# ---------------------------------------------------------------------------
+
+@router.post("/hybrid/", response_model=HybridMessageResponse, status_code=status.HTTP_201_CREATED)
+def create_hybrid_message(
+    payload: HybridMessageCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -77,23 +109,8 @@ def create_message(
     return message
 
 
-@router.get("/", response_model=list[MessageResponse])
-def get_messages(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return (
-        db.query(Message)
-        .filter(
-            (Message.recipient_id == current_user.id)
-            | (Message.sender_id == current_user.id)
-        )
-        .all()
-    )
-
-
 @router.post("/{message_id}/decrypt", response_model=MessageDecryptResponse)
-def decrypt_message(
+def decrypt_hybrid_message(
     message_id: int,
     payload: MessageDecryptRequest,
     db: Session = Depends(get_db),

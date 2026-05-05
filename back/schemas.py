@@ -32,18 +32,22 @@ class TokenResponse(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
-    recipient_id: int
-
-
-class MessageDecryptRequest(BaseModel):
-    password: str
-
-
-class MessageDecryptResponse(BaseModel):
-    plaintext: str
 
 
 class MessageResponse(BaseModel):
+    id: int
+    ciphertext: str
+    nonce: str
+
+    model_config = {"from_attributes": True}
+
+
+class HybridMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+    recipient_id: int
+
+
+class HybridMessageResponse(BaseModel):
     id: int
     sender_id: int | None = None
     recipient_id: int | None = None
@@ -53,3 +57,11 @@ class MessageResponse(BaseModel):
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class MessageDecryptRequest(BaseModel):
+    password: str
+
+
+class MessageDecryptResponse(BaseModel):
+    plaintext: str
