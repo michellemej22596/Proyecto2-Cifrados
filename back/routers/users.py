@@ -3,9 +3,14 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import User
-from schemas import PublicKeyResponse
+from schemas import PublicKeyResponse, UserResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("/", response_model=list[UserResponse])
+def get_users(db: Session = Depends(get_db)):
+    return db.query(User).all()
 
 
 @router.get("/{user_id}/key", response_model=PublicKeyResponse)
