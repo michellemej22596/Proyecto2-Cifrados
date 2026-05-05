@@ -154,7 +154,7 @@ Autenticacion multifactor y despliegue containerizado.
 ```bash
 # Clonar el repositorio
 git clone https://github.com/michellemej22596/Proyecto2-Cifrados.git
-cd vaultchain
+cd Proyecto2-Cifrados
 
 # Crear entorno virtual
 python -m venv venv
@@ -166,7 +166,6 @@ pip install -r requirements.txt
 
 # Configurar variables de entorno
 cp .env.example .env
-# Editar .env con tus credenciales
 
 # Ejecutar migraciones
 alembic upgrade head
