@@ -7,10 +7,12 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from jose import jwt
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import rsa, padding as asym_padding
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.serialization import load_pem_public_key, load_pem_private_key
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -111,3 +113,97 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     )
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_aes_key() -> bytes:
+    key_b64 = os.getenv("AES_MESSAGES_KEY")
+
+    if not key_b64:
+        key = AESGCM.generate_key(bit_length=256)
+        return key
+
+    return base64.urlsafe_b64decode(key_b64)
+
+
+def encrypt_message_aes_gcm(plaintext: str) -> tuple[str, str]:
+    key = get_aes_key()
+    aesgcm = AESGCM(key)
+
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode(), None)
+
+    return (
+        base64.urlsafe_b64encode(ciphertext).decode(),
+        base64.urlsafe_b64encode(nonce).decode(),
+    )
+
+
+def decrypt_message_aes_gcm(ciphertext_b64: str, nonce_b64: str) -> str:
+    key = get_aes_key()
+    aesgcm = AESGCM(key)
+
+    ciphertext = base64.urlsafe_b64decode(ciphertext_b64)
+    nonce = base64.urlsafe_b64decode(nonce_b64)
+
+    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+    return plaintext.decode()
+
+
+# ---------------------------------------------------------------------------
+# Cifrado híbrido: RSA-OAEP + AES-256-GCM
+# ---------------------------------------------------------------------------
+
+def encrypt_aes_key_rsa_oaep(public_key_pem: str, aes_key: bytes) -> str:
+    """Cifra una clave AES con la llave pública RSA del destinatario (OAEP/SHA-256)."""
+    public_key = load_pem_public_key(public_key_pem.encode())
+    encrypted = public_key.encrypt(
+        aes_key,
+        asym_padding.OAEP(
+            mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )
+    return base64.urlsafe_b64encode(encrypted).decode()
+
+
+def decrypt_aes_key_rsa_oaep(private_key_pem: bytes, encrypted_key_b64: str) -> bytes:
+    """Recupera la clave AES usando la llave privada RSA del destinatario (OAEP/SHA-256)."""
+    private_key = load_pem_private_key(private_key_pem, password=None)
+    encrypted_key = base64.urlsafe_b64decode(encrypted_key_b64)
+    return private_key.decrypt(
+        encrypted_key,
+        asym_padding.OAEP(
+            mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )
+
+
+def encrypt_message_hybrid(plaintext: str, recipient_public_key_pem: str) -> dict:
+    """Genera una clave AES-256 efímera, cifra el mensaje con AES-256-GCM,
+    y cifra la clave AES con la llave pública RSA-OAEP del destinatario."""
+    aes_key = os.urandom(32)
+    aesgcm = AESGCM(aes_key)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode(), None)
+
+    return {
+        "ciphertext": base64.urlsafe_b64encode(ciphertext).decode(),
+        "nonce": base64.urlsafe_b64encode(nonce).decode(),
+        "encrypted_key": encrypt_aes_key_rsa_oaep(recipient_public_key_pem, aes_key),
+    }
+
+
+def decrypt_message_hybrid(
+    private_key_pem: bytes,
+    encrypted_key_b64: str,
+    ciphertext_b64: str,
+    nonce_b64: str,
+) -> str:
+    """Descifra un mensaje cifrado con cifrado híbrido (RSA-OAEP + AES-256-GCM)."""
+    aes_key = decrypt_aes_key_rsa_oaep(private_key_pem, encrypted_key_b64)
+    aesgcm = AESGCM(aes_key)
+    nonce = base64.urlsafe_b64decode(nonce_b64)
+    ciphertext = base64.urlsafe_b64decode(ciphertext_b64)
+    return aesgcm.decrypt(nonce, ciphertext, None).decode()
