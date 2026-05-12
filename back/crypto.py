@@ -124,17 +124,27 @@ def get_aes_key() -> bytes:
     return base64.urlsafe_b64decode(key_b64)
 
 
-def encrypt_message_aes_gcm(plaintext: str) -> tuple[str, str]:
-    key = get_aes_key()
+def _aes_gcm_encrypt(plaintext: str, key: bytes) -> tuple[str, str, str]:
+    """Cifra con AES-256-GCM y devuelve (ciphertext_b64, nonce_b64, auth_tag_b64).
+
+    AESGCM.encrypt() concatena ciphertext || tag (tag = últimos 16 bytes).
+    Esta función los separa para que el tag quede almacenado de forma explícita.
+    """
     aesgcm = AESGCM(key)
-
     nonce = os.urandom(12)
-    ciphertext = aesgcm.encrypt(nonce, plaintext.encode(), None)
-
+    encrypted = aesgcm.encrypt(nonce, plaintext.encode(), None)
+    ciphertext, auth_tag = encrypted[:-16], encrypted[-16:]
     return (
         base64.urlsafe_b64encode(ciphertext).decode(),
         base64.urlsafe_b64encode(nonce).decode(),
+        base64.urlsafe_b64encode(auth_tag).decode(),
     )
+
+
+def encrypt_message_aes_gcm(plaintext: str) -> tuple[str, str]:
+    key = get_aes_key()
+    ciphertext, nonce, _ = _aes_gcm_encrypt(plaintext, key)
+    return ciphertext, nonce
 
 
 def decrypt_message_aes_gcm(ciphertext_b64: str, nonce_b64: str) -> str:
@@ -181,16 +191,14 @@ def decrypt_aes_key_rsa_oaep(private_key_pem: bytes, encrypted_key_b64: str) -> 
 
 
 def encrypt_message_hybrid(plaintext: str, recipient_public_key_pem: str) -> dict:
-    """Genera una clave AES-256 efímera, cifra el mensaje con AES-256-GCM,
+    """Genera una clave AES-256 efímera, cifra con _aes_gcm_encrypt,
     y cifra la clave AES con la llave pública RSA-OAEP del destinatario."""
     aes_key = os.urandom(32)
-    aesgcm = AESGCM(aes_key)
-    nonce = os.urandom(12)
-    ciphertext = aesgcm.encrypt(nonce, plaintext.encode(), None)
-
+    ciphertext, nonce, auth_tag = _aes_gcm_encrypt(plaintext, aes_key)
     return {
-        "ciphertext": base64.urlsafe_b64encode(ciphertext).decode(),
-        "nonce": base64.urlsafe_b64encode(nonce).decode(),
+        "ciphertext": ciphertext,
+        "nonce": nonce,
+        "auth_tag": auth_tag,
         "encrypted_key": encrypt_aes_key_rsa_oaep(recipient_public_key_pem, aes_key),
     }
 
@@ -200,10 +208,12 @@ def decrypt_message_hybrid(
     encrypted_key_b64: str,
     ciphertext_b64: str,
     nonce_b64: str,
+    auth_tag_b64: str,
 ) -> str:
-    """Descifra un mensaje cifrado con cifrado híbrido (RSA-OAEP + AES-256-GCM)."""
+    """Recupera la clave AES con RSA-OAEP y descifra el mensaje verificando el auth tag."""
     aes_key = decrypt_aes_key_rsa_oaep(private_key_pem, encrypted_key_b64)
     aesgcm = AESGCM(aes_key)
     nonce = base64.urlsafe_b64decode(nonce_b64)
     ciphertext = base64.urlsafe_b64decode(ciphertext_b64)
-    return aesgcm.decrypt(nonce, ciphertext, None).decode()
+    auth_tag = base64.urlsafe_b64decode(auth_tag_b64)
+    return aesgcm.decrypt(nonce, ciphertext + auth_tag, None).decode()

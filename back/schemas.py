@@ -54,6 +54,7 @@ class HybridMessageResponse(BaseModel):
     ciphertext: str
     encrypted_key: str | None = None
     nonce: str
+    auth_tag: str | None = None
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}

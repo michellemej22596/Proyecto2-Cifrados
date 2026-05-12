@@ -99,6 +99,7 @@ def create_hybrid_message(
         recipient_id=recipient.id,
         ciphertext=encrypted["ciphertext"],
         nonce=encrypted["nonce"],
+        auth_tag=encrypted["auth_tag"],
         encrypted_key=encrypted["encrypted_key"],
     )
 
@@ -143,12 +144,19 @@ def decrypt_hybrid_message(
             detail="Contraseña incorrecta",
         )
 
+    if message.auth_tag is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este mensaje no contiene auth tag (no es un mensaje híbrido válido)",
+        )
+
     try:
         plaintext = decrypt_message_hybrid(
             private_key_pem,
             message.encrypted_key,
             message.ciphertext,
             message.nonce,
+            message.auth_tag,
         )
     except Exception:
         raise HTTPException(
