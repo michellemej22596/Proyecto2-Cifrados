@@ -114,16 +114,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_aes_key() -> bytes:
-    key_b64 = os.getenv("AES_MESSAGES_KEY")
-
-    if not key_b64:
-        key = AESGCM.generate_key(bit_length=256)
-        return key
-
-    return base64.urlsafe_b64decode(key_b64)
-
-
 def _aes_gcm_encrypt(plaintext: str, key: bytes) -> tuple[str, str, str]:
     """Cifra con AES-256-GCM y devuelve (ciphertext_b64, nonce_b64, auth_tag_b64).
 
@@ -139,23 +129,6 @@ def _aes_gcm_encrypt(plaintext: str, key: bytes) -> tuple[str, str, str]:
         base64.urlsafe_b64encode(nonce).decode(),
         base64.urlsafe_b64encode(auth_tag).decode(),
     )
-
-
-def encrypt_message_aes_gcm(plaintext: str) -> tuple[str, str]:
-    key = get_aes_key()
-    ciphertext, nonce, _ = _aes_gcm_encrypt(plaintext, key)
-    return ciphertext, nonce
-
-
-def decrypt_message_aes_gcm(ciphertext_b64: str, nonce_b64: str) -> str:
-    key = get_aes_key()
-    aesgcm = AESGCM(key)
-
-    ciphertext = base64.urlsafe_b64decode(ciphertext_b64)
-    nonce = base64.urlsafe_b64decode(nonce_b64)
-
-    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
-    return plaintext.decode()
 
 
 # ---------------------------------------------------------------------------
