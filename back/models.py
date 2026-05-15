@@ -24,6 +24,7 @@ class Message(Base):
     ciphertext = Column(String, nullable=False)
     encrypted_key = Column(String, nullable=True)
     nonce = Column(String, nullable=False)
+    auth_tag = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Group(Base):
