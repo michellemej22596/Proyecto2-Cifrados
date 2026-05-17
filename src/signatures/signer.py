@@ -35,8 +35,6 @@ class DigitalSignatureService:
         """
         private_key = load_pem_private_key(private_key_pem.encode('utf-8'), password=None)
         
-        # Firmamos el mensaje utilizando ECDSA y SHA-256. La librería 'cryptography' 
-        # se encarga de aplicar el hash internamente al proveer hashes.SHA256().
         signature = private_key.sign(
             plaintext.encode('utf-8'),
             ec.ECDSA(hashes.SHA256())
@@ -59,7 +57,6 @@ class DigitalSignatureService:
             public_key = load_pem_public_key(public_key_pem.encode('utf-8'))
             signature = base64.b64decode(signature_b64)
             
-            # Verificamos la firma contra el mensaje en texto plano
             public_key.verify(
                 signature,
                 plaintext.encode('utf-8'),
