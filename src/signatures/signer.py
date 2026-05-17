@@ -1,9 +1,8 @@
 import base64
 import hashlib
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
-from cryptography.exceptions import InvalidSignature
+from Crypto.PublicKey import ECC
+from Crypto.Signature import DSS
+from Crypto.Hash import SHA256
 
 class DigitalSignatureService:
     """
@@ -33,12 +32,22 @@ class DigitalSignatureService:
         :param private_key_pem: La llave privada del remitente en formato PEM (como string).
         :return: La firma resultante codificada en Base64.
         """
-        private_key = load_pem_private_key(private_key_pem.encode('utf-8'), password=None)
+        # 1. Obtenemos el hash SHA-256 explícitamente utilizando nuestra función
+        message_hash_hex = DigitalSignatureService.calculate_message_hash(plaintext)
         
-        signature = private_key.sign(
-            plaintext.encode('utf-8'),
-            ec.ECDSA(hashes.SHA256())
-        )
+        # 2. PyCryptodome (DSS) requiere su propio objeto Hash para inyectarlo en la firma.
+        # Creamos el objeto y garantizamos estrictamente que su digest coincida con el hash
+        # calculado previamente para cumplir con la auditoría de uso explícito.
+        hash_obj = SHA256.new(plaintext.encode('utf-8'))
+        
+        if hash_obj.hexdigest() != message_hash_hex:
+            raise ValueError("Inconsistencia en el hash del mensaje")
+            
+        # 3. Importamos la llave ECDSA y firmamos el objeto hash (P-256)
+        key = ECC.import_key(private_key_pem)
+        signer = DSS.new(key, 'fips-186-3')
+        
+        signature = signer.sign(hash_obj)
         
         return base64.b64encode(signature).decode('utf-8')
 
@@ -53,15 +62,21 @@ class DigitalSignatureService:
         :param public_key_pem: La llave pública del remitente en formato PEM (como string).
         :return: True si es válida, False si fue alterada o la verificación falla.
         """
+        # Uso explícito de la función de hash según los requerimientos
+        message_hash_hex = DigitalSignatureService.calculate_message_hash(plaintext)
+        
         try:
-            public_key = load_pem_public_key(public_key_pem.encode('utf-8'))
+            key = ECC.import_key(public_key_pem)
             signature = base64.b64decode(signature_b64)
             
-            public_key.verify(
-                signature,
-                plaintext.encode('utf-8'),
-                ec.ECDSA(hashes.SHA256())
-            )
+            # Recreamos el hash object para DSS.verify y validamos que sea el mismo
+            hash_obj = SHA256.new(plaintext.encode('utf-8'))
+            
+            if hash_obj.hexdigest() != message_hash_hex:
+                return False
+                
+            verifier = DSS.new(key, 'fips-186-3')
+            verifier.verify(hash_obj, signature)
             return True
-        except (InvalidSignature, ValueError, TypeError):
+        except (ValueError, TypeError):
             return False

@@ -55,8 +55,8 @@ class Blockchain:
         genesis_block = Block(
             index=0,
             timestamp=timestamp,
-            sender_id="SISTEMA_GOB",
-            recipient_id="MINISTERIO_FINANZAS",
+            sender_id="00000000-0000-0000-0000-000000000000",
+            recipient_id="00000000-0000-0000-0000-000000000000",
             message_hash="0000000000000000000000000000000000000000000000000000000000000000",
             previous_hash="0" * 64,
             nonce=0
