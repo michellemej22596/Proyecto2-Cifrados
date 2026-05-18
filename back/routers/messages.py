@@ -76,12 +76,22 @@ def create_hybrid_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Crea un mensaje cifrado hibrido (RSA-OAEP + AES-256-GCM).
+    
+    Ademas:
+    1. Calcula el hash SHA-256 del texto plano original
+    2. Registra automaticamente la transaccion en la blockchain
+    """
     recipient = db.query(User).filter(User.id == payload.recipient_id).first()
     if recipient is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Destinatario no encontrado",
         )
+
+    # Calcular hash del mensaje ANTES de cifrar (para registro en blockchain)
+    message_hash = DigitalSignatureService.calculate_message_hash(payload.content)
 
     encrypted = encrypt_message_hybrid(payload.content, recipient.public_key_pem)
 
@@ -97,6 +107,14 @@ def create_hybrid_message(
     db.add(message)
     db.commit()
     db.refresh(message)
+
+    # Registrar automaticamente en la blockchain
+    bc = get_blockchain()
+    bc.add_new_transaction(
+        sender_id=str(current_user.id),
+        recipient_id=str(recipient.id),
+        message_hash=message_hash,
+    )
 
     return message
 
