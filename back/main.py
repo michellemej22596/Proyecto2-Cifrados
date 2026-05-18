@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base
-from routers import auth, users, messages, groups
+from routers import auth, users, messages, groups, blockchain
 
 # Crear tablas al iniciar
 Base.metadata.create_all(bind=engine)
@@ -24,6 +24,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(messages.router)
 app.include_router(groups.router)
+app.include_router(blockchain.router)
 
 @app.get("/", tags=["health"])
 def root():
