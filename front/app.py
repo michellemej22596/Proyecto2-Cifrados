@@ -289,7 +289,7 @@ with tab1:
     st.markdown('<div class="badge">Nuevo usuario</div>', unsafe_allow_html=True)
     st.subheader("Crear cuenta")
 
-    st.caption("Completa tus datos para registrar un usuario y generar automaticamente su par de llaves RSA.")
+    st.caption("Completa tus datos para registrar un usuario y generar automaticamente su par de llaves ECDSA.")
 
     with st.form("register_form"):
         col1, col2 = st.columns(2)
@@ -313,7 +313,7 @@ with tab1:
         elif password != password_confirm:
             st.error("Las contrasenas no coinciden.")
         else:
-            with st.spinner("Registrando usuario y generando llaves RSA..."):
+            with st.spinner("Registrando usuario y generando llaves ECDSA..."):
                 try:
                     response = requests.post(
                         f"{API_BASE}/auth/register",
@@ -336,7 +336,7 @@ with tab1:
                         st.write(f"**ID:** {data['id']}")
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                        with st.expander("Ver llave publica generada (RSA)"):
+                        with st.expander("Ver llave publica generada (ECDSA)"):
                             st.code(data["public_key_pem"], language="text")
 
                         st.info(
@@ -457,7 +457,7 @@ with tab3:
     st.markdown('<div class="badge">Firma Digital + Blockchain</div>', unsafe_allow_html=True)
     st.subheader("Enviar mensaje cifrado y firmado")
     st.caption(
-        "El mensaje sera firmado digitalmente con tu llave privada RSA (RSA-PSS), "
+        "El mensaje sera firmado digitalmente con tu llave privada ECDSA, "
         "cifrado con AES-256-GCM y registrado automaticamente en la blockchain."
     )
 
@@ -476,7 +476,7 @@ with tab3:
                 "Tu contrasena (para firmar)",
                 type="password",
                 value=st.session_state.get("user_password", ""),
-                help="Necesaria para desbloquear tu llave privada RSA y firmar el mensaje."
+                help="Necesaria para desbloquear tu llave privada ECDSA y firmar el mensaje."
             )
             hybrid_submitted = st.form_submit_button("Firmar, Cifrar y Enviar")
 
@@ -486,7 +486,7 @@ with tab3:
             elif not sender_password:
                 st.error("Debes ingresar tu contrasena para firmar el mensaje.")
             else:
-                with st.spinner("Firmando con RSA-PSS, cifrando con AES-256-GCM y registrando en blockchain..."):
+                with st.spinner("Firmando con ECDSA, cifrando con AES-256-GCM y registrando en blockchain..."):
                     try:
                         response = requests.post(
                             f"{API_BASE}/messages/hybrid/",
@@ -514,7 +514,7 @@ with tab3:
                             
                             # Mostrar firma digital
                             if data.get('signature'):
-                                with st.expander("Ver Firma Digital (RSA-PSS)"):
+                                with st.expander("Ver Firma Digital (ECDSA)"):
                                     st.markdown(
                                         f'<div class="signature-box">{data["signature"][:100]}...</div>',
                                         unsafe_allow_html=True
@@ -613,10 +613,10 @@ with tab4:
 # =========================
 with tab5:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="badge">Descifrado RSA-OAEP + AES-GCM</div>', unsafe_allow_html=True)
+    st.markdown('<div class="badge">Descifrado ECDH + AES-GCM</div>', unsafe_allow_html=True)
     st.subheader("Descifrar mensaje")
     st.caption(
-        "Usa tu llave privada RSA (protegida con tu contrasena) para recuperar "
+        "Usa tu llave privada ECDSA (protegida con tu contrasena) para recuperar "
         "la clave AES efimera y descifrar el mensaje."
     )
 
@@ -634,7 +634,7 @@ with tab5:
                 "Tu contrasena",
                 type="password",
                 value=st.session_state.get("user_password", ""),
-                help="Necesaria para desbloquear tu llave privada RSA.",
+                help="Necesaria para desbloquear tu llave privada ECDSA.",
             )
             decrypt_submitted = st.form_submit_button("Descifrar")
 
@@ -642,7 +642,7 @@ with tab5:
             if not decrypt_password:
                 st.error("Ingresa tu contrasena.")
             else:
-                with st.spinner("Descifrando con RSA-OAEP + AES-256-GCM..."):
+                with st.spinner("Descifrando con ECDH + AES-256-GCM..."):
                     try:
                         response = requests.post(
                             f"{API_BASE}/messages/{int(decrypt_msg_id)}/decrypt",

@@ -17,6 +17,7 @@ from crypto import (
     SECRET_KEY,
     ALGORITHM,
     decrypt_private_key,
+    decrypt_ecdsa_private_key,
     encrypt_message_hybrid,
     decrypt_message_hybrid,
 )
@@ -96,18 +97,18 @@ def create_hybrid_message(
             detail="Destinatario no encontrado",
         )
 
-    # 1. Descifrar la llave privada del remitente para poder firmar
+    # 1. Descifrar la llave privada ECDSA del remitente para poder firmar
     try:
-        sender_private_key = decrypt_private_key(payload.password, current_user.encrypted_private_key)
+        sender_ecdsa_private_key = decrypt_ecdsa_private_key(payload.password, current_user.encrypted_ecdsa_private_key)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Contraseña incorrecta. No se puede firmar el mensaje.",
         )
 
-    # 2. Firmar el mensaje usando ECDSA (sign_message) - Fase 3
+    # 2. Firmar el mensaje usando ECDSA (Curva P-256) - Fase 3
     try:
-        signature = DigitalSignatureService.sign_message(payload.content, sender_private_key.decode('utf-8'))
+        signature = DigitalSignatureService.sign_message(payload.content, sender_ecdsa_private_key.decode('utf-8'))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -339,13 +340,13 @@ def verify_message_with_decryption(
             detail="Remitente no encontrado",
         )
 
-    # Verificar la firma digital si existe usando ECDSA - Fase 3
+    # Verificar la firma digital si existe usando ECDSA (Curva P-256) - Fase 3
     signature_valid = False
     if message.signature:
         signature_valid = DigitalSignatureService.verify_message_signature(
             plaintext,
             message.signature,
-            sender.public_key_pem
+            sender.ecdsa_public_key_pem  # Usar llave pública ECDSA del remitente
         )
 
     # Calcular hash del mensaje descifrado
