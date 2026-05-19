@@ -45,6 +45,7 @@ class MessageResponse(BaseModel):
 class HybridMessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
     recipient_id: int
+    password: str = Field(..., min_length=1, description="Contraseña del remitente para firmar el mensaje")
 
 
 class HybridMessageResponse(BaseModel):
@@ -55,6 +56,8 @@ class HybridMessageResponse(BaseModel):
     encrypted_key: str | None = None
     nonce: str
     auth_tag: str | None = None
+    signature: str | None = None
+    verification_status: str | None = None
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}

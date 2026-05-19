@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from database import get_db
 from models import User
 from schemas import UserRegister, UserResponse, UserLogin, TokenResponse
-from crypto import hash_password, generate_key_pair, verify_password, create_access_token
+from crypto import hash_password, generate_key_pair, generate_ecdsa_key_pair, verify_password, create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -21,7 +21,10 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
         )
 
     password_hash = hash_password(payload.password)
+    # Generar llaves RSA-2048 para cifrado híbrido
     public_key_pem, encrypted_private_key = generate_key_pair(payload.password)
+    # Generar llaves ECDSA P-256 para firmas digitales
+    ecdsa_public_key_pem, encrypted_ecdsa_private_key = generate_ecdsa_key_pair(payload.password)
 
     user = User(
         name=payload.name,
@@ -29,6 +32,8 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
         password_hash=password_hash,
         public_key_pem=public_key_pem,
         encrypted_private_key=encrypted_private_key,
+        ecdsa_public_key_pem=ecdsa_public_key_pem,
+        encrypted_ecdsa_private_key=encrypted_ecdsa_private_key,
     )
 
     try:

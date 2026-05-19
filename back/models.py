@@ -10,9 +10,13 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
+    # Llaves RSA-2048 para cifrado híbrido (RSA-OAEP + AES-GCM)
     public_key_pem = Column(String, nullable=False)
     # Formato: "<base64_pbkdf2_salt>.<fernet_token>"
     encrypted_private_key = Column(String, nullable=False)
+    # Llaves ECDSA P-256 para firmas digitales
+    ecdsa_public_key_pem = Column(String, nullable=True)
+    encrypted_ecdsa_private_key = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Message(Base):
@@ -25,6 +29,10 @@ class Message(Base):
     encrypted_key = Column(String, nullable=True)
     nonce = Column(String, nullable=False)
     auth_tag = Column(String, nullable=True)
+    # Campo de firma digital (RSA-PSS o ECDSA) - Base64 encoded
+    signature = Column(String, nullable=True)
+    # Estado de verificación: VERIFIED, NOT_VERIFIED, PENDING
+    verification_status = Column(String, nullable=True, default="PENDING")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Group(Base):

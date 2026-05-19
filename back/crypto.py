@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from jose import jwt
-from cryptography.hazmat.primitives.asymmetric import rsa, padding as asym_padding
+from cryptography.hazmat.primitives.asymmetric import rsa, padding as asym_padding, ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.serialization import load_pem_public_key, load_pem_private_key
@@ -190,3 +190,61 @@ def decrypt_message_hybrid(
     ciphertext = base64.urlsafe_b64decode(ciphertext_b64)
     auth_tag = base64.urlsafe_b64decode(auth_tag_b64)
     return aesgcm.decrypt(nonce, ciphertext + auth_tag, None).decode()
+
+
+# ---------------------------------------------------------------------------
+# ECDSA P-256 key pair generation para firmas digitales
+# ---------------------------------------------------------------------------
+
+def generate_ecdsa_key_pair(password: str) -> tuple[str, str]:
+    """Genera un par de llaves ECDSA (curva P-256) para firmas digitales.
+    
+    La llave privada se cifra con Fernet usando una clave derivada con PBKDF2
+    de la contraseña del usuario. El resultado se almacena como:
+        <base64(salt)>.<fernet_token>
+    
+    Returns:
+        tuple[str, str]: (ecdsa_public_key_pem, encrypted_ecdsa_private_key)
+    """
+    # Generar par de llaves ECDSA con curva P-256 (SECP256R1)
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    
+    # Exportar llave pública en formato PEM
+    public_key_pem: str = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+    
+    # Exportar llave privada en formato PEM (sin cifrar, para luego cifrar con Fernet)
+    private_key_pem: bytes = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    
+    # Cifrar la llave privada con clave derivada de la contraseña
+    pbkdf2_salt = os.urandom(16)
+    fernet_key = _derive_fernet_key(password, pbkdf2_salt)
+    token = Fernet(fernet_key).encrypt(private_key_pem)
+    
+    # Serializar como "<base64_salt>.<fernet_token>"
+    salt_b64 = base64.urlsafe_b64encode(pbkdf2_salt).decode()
+    encrypted_private_key = f"{salt_b64}.{token.decode()}"
+    
+    return public_key_pem, encrypted_private_key
+
+
+def decrypt_ecdsa_private_key(password: str, encrypted_private_key: str) -> bytes:
+    """Descifra la llave privada ECDSA almacenada.
+    
+    Args:
+        password: Contraseña del usuario
+        encrypted_private_key: Llave cifrada en formato "<base64_salt>.<fernet_token>"
+    
+    Returns:
+        bytes: Llave privada ECDSA en formato PEM
+    """
+    salt_b64, token = encrypted_private_key.split(".", 1)
+    pbkdf2_salt = base64.urlsafe_b64decode(salt_b64)
+    fernet_key = _derive_fernet_key(password, pbkdf2_salt)
+    return Fernet(fernet_key).decrypt(token.encode())
