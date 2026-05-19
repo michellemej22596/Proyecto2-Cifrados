@@ -22,6 +22,7 @@ from crypto import (
 )
 from signatures.signer import DigitalSignatureService
 from routers.blockchain import get_blockchain
+from services.alerts import AlertService
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -77,12 +78,17 @@ def create_hybrid_message(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Crea un mensaje cifrado hibrido (RSA-OAEP + AES-256-GCM).
+    Crea un mensaje cifrado hibrido (RSA-OAEP + AES-256-GCM) con firma digital.
     
-    Ademas:
-    1. Calcula el hash SHA-256 del texto plano original
-    2. Registra automaticamente la transaccion en la blockchain
+    Flujo completo (Responsabilidades de Silvia):
+    1. Descifra la llave privada del remitente usando su contraseña
+    2. Firma el mensaje (SHA-256 + RSA-PSS) con la llave privada
+    3. Calcula el hash SHA-256 del texto plano original
+    4. Cifra el mensaje con cifrado híbrido para el destinatario
+    5. Guarda el mensaje con la firma en la base de datos
+    6. Registra automáticamente la transacción en la blockchain
     """
+    # Verificar que el destinatario existe
     recipient = db.query(User).filter(User.id == payload.recipient_id).first()
     if recipient is None:
         raise HTTPException(
@@ -90,11 +96,31 @@ def create_hybrid_message(
             detail="Destinatario no encontrado",
         )
 
-    # Calcular hash del mensaje ANTES de cifrar (para registro en blockchain)
+    # 1. Descifrar la llave privada del remitente para poder firmar
+    try:
+        sender_private_key = decrypt_private_key(payload.password, current_user.encrypted_private_key)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Contraseña incorrecta. No se puede firmar el mensaje.",
+        )
+
+    # 2. Firmar el mensaje usando RSA-PSS (sign_message)
+    try:
+        signature = DigitalSignatureService.sign_message_rsa(payload.content, sender_private_key)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al firmar el mensaje: {str(e)}",
+        )
+
+    # 3. Calcular hash del mensaje ANTES de cifrar (para registro en blockchain)
     message_hash = DigitalSignatureService.calculate_message_hash(payload.content)
 
+    # 4. Cifrar el mensaje con cifrado híbrido para el destinatario
     encrypted = encrypt_message_hybrid(payload.content, recipient.public_key_pem)
 
+    # 5. Crear y guardar el mensaje en la base de datos con la firma
     message = Message(
         sender_id=current_user.id,
         recipient_id=recipient.id,
@@ -102,13 +128,15 @@ def create_hybrid_message(
         nonce=encrypted["nonce"],
         auth_tag=encrypted["auth_tag"],
         encrypted_key=encrypted["encrypted_key"],
+        signature=signature,  # Campo de firma digital
+        verification_status="PENDING",  # Estado inicial
     )
 
     db.add(message)
     db.commit()
     db.refresh(message)
 
-    # Registrar automaticamente en la blockchain
+    # 6. Registrar automáticamente en la blockchain (add_new_transaction)
     bc = get_blockchain()
     bc.add_new_transaction(
         sender_id=str(current_user.id),
@@ -185,13 +213,14 @@ def verify_message_authenticity(
     """
     GET /messages/{msg_id}/verify
     
-    Verifica la autenticidad de un mensaje especifico:
+    Verifica la autenticidad básica de un mensaje específico:
     1. Verifica que el mensaje exista
     2. Verifica que el usuario tenga acceso (sea remitente o destinatario)
-    3. Verifica el registro en la blockchain (si existe)
+    3. Verifica si existe firma digital almacenada
+    4. Verifica el registro en la blockchain (si existe)
     
-    Nota: La verificacion completa de firma requiere descifrar el mensaje,
-    lo cual necesita la contrasena del destinatario via POST.
+    Nota: La verificación completa de firma requiere descifrar el mensaje,
+    lo cual necesita la contraseña del destinatario via POST.
     """
     message = db.query(Message).filter(Message.id == message_id).first()
     if message is None:
@@ -207,7 +236,10 @@ def verify_message_authenticity(
             detail="No tienes acceso a este mensaje",
         )
 
-    # Verificar si el mensaje esta registrado en la blockchain
+    # Verificar si el mensaje tiene firma almacenada
+    has_signature = message.signature is not None and len(message.signature) > 0
+
+    # Verificar si el mensaje está registrado en la blockchain
     bc = get_blockchain()
     blockchain_registered = False
     for block in bc.chain[1:]:  # Ignorar genesis
@@ -216,15 +248,23 @@ def verify_message_authenticity(
             blockchain_registered = True
             break
 
+    # Determinar estado
+    if has_signature:
+        signature_status = "SIGNATURE_PRESENT"
+        status_message = "Firma digital presente. Use POST para verificar con descifrado completo."
+    else:
+        signature_status = "NO_SIGNATURE_STORED"
+        status_message = "ADVERTENCIA: Este mensaje no tiene firma digital almacenada."
+
     return MessageVerifyResponse(
         message_id=message_id,
-        is_signature_valid=True,  # Asumimos valido sin firma almacenada
+        is_signature_valid=has_signature,  # Parcialmente válido si tiene firma
         sender_id=message.sender_id,
         recipient_id=message.recipient_id,
         plaintext=None,  # No podemos descifrar sin password
-        signature_status="NO_SIGNATURE_STORED" if not hasattr(message, 'signature') or message.signature is None else "SIGNATURE_PRESENT",
+        signature_status=signature_status,
         blockchain_registered=blockchain_registered,
-        message="Verificacion basica completada. Use POST para verificar firma con descifrado.",
+        message=status_message,
     )
 
 
@@ -238,12 +278,13 @@ def verify_message_with_decryption(
     """
     POST /messages/{msg_id}/verify
     
-    Verifica la autenticidad completa de un mensaje:
-    1. Descifra el mensaje usando la contrasena del destinatario
-    2. Calcula el hash del texto plano
-    3. Verifica si existe en la blockchain con el hash correcto
+    Verifica la autenticidad completa de un mensaje (Flujo de Silvia):
+    1. Descifra el mensaje usando la contraseña del destinatario
+    2. Verifica la firma digital usando la llave pública del remitente
+    3. Si la firma NO coincide: marca como NO VERIFICADO y dispara alerta
+    4. Calcula el hash del texto plano y verifica en blockchain
     
-    Retorna el estado de verificacion y el texto descifrado.
+    Retorna el estado de verificación y el texto descifrado.
     """
     message = db.query(Message).filter(Message.id == message_id).first()
     if message is None:
@@ -261,16 +302,16 @@ def verify_message_with_decryption(
     if message.encrypted_key is None or message.auth_tag is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Este mensaje no usa cifrado hibrido valido",
+            detail="Este mensaje no usa cifrado híbrido válido",
         )
 
-    # Descifrar la llave privada
+    # Descifrar la llave privada del destinatario
     try:
         private_key_pem = decrypt_private_key(payload.password, current_user.encrypted_private_key)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Contrasena incorrecta",
+            detail="Contraseña incorrecta",
         )
 
     # Descifrar el mensaje
@@ -286,6 +327,23 @@ def verify_message_with_decryption(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Error al descifrar el mensaje",
+        )
+
+    # Obtener la llave pública del remitente para verificar la firma
+    sender = db.query(User).filter(User.id == message.sender_id).first()
+    if sender is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Remitente no encontrado",
+        )
+
+    # Verificar la firma digital si existe
+    signature_valid = False
+    if message.signature:
+        signature_valid = DigitalSignatureService.verify_message_signature_rsa(
+            plaintext,
+            message.signature,
+            sender.public_key_pem
         )
 
     # Calcular hash del mensaje descifrado
@@ -304,19 +362,56 @@ def verify_message_with_decryption(
                 hash_matches = True
             break
 
-    # Determinar estado de la firma/verificacion
-    if blockchain_registered and hash_matches:
+    # Determinar estado de verificación y actualizar en BD
+    # Flujo de excepción de Silvia: Si la firma NO coincide -> NO VERIFICADO + alerta
+    if not message.signature:
+        signature_status = "NO_SIGNATURE"
+        is_valid = False
+        message.verification_status = "NOT_VERIFIED"
+        result_message = "ALERTA: El mensaje no tiene firma digital. No se puede verificar autenticidad."
+        # Disparar alerta de seguridad
+        AlertService.create_no_signature_alert(
+            message_id=message_id,
+            sender_id=message.sender_id,
+            recipient_id=message.recipient_id,
+        )
+    elif not signature_valid:
+        # ⚠️ ALERTA AL USUARIO: Firma digital no coincide
+        signature_status = "SIGNATURE_INVALID"
+        is_valid = False
+        message.verification_status = "NOT_VERIFIED"
+        result_message = "⚠️ ALERTA DE SEGURIDAD: La firma digital NO COINCIDE. El mensaje puede haber sido alterado o el remitente no es quien dice ser. NO CONFÍE en este mensaje."
+        # Disparar alerta crítica de seguridad (flujo de excepción de Silvia)
+        AlertService.create_signature_invalid_alert(
+            message_id=message_id,
+            sender_id=message.sender_id,
+            recipient_id=message.recipient_id,
+        )
+    elif blockchain_registered and hash_matches:
         signature_status = "VERIFIED"
         is_valid = True
-        result_message = "Mensaje verificado exitosamente. Hash coincide con registro en blockchain."
+        message.verification_status = "VERIFIED"
+        result_message = "✓ Mensaje verificado exitosamente. Firma válida y hash coincide con registro en blockchain."
     elif blockchain_registered and not hash_matches:
         signature_status = "HASH_MISMATCH"
         is_valid = False
-        result_message = "ALERTA: El hash del mensaje NO coincide con el registro en blockchain. Posible alteracion."
+        message.verification_status = "NOT_VERIFIED"
+        result_message = "⚠️ ALERTA: El hash del mensaje NO coincide con el registro en blockchain. Posible alteración del contenido."
+        # Disparar alerta de hash mismatch
+        AlertService.create_hash_mismatch_alert(
+            message_id=message_id,
+            sender_id=message.sender_id,
+            recipient_id=message.recipient_id,
+        )
     else:
-        signature_status = "NOT_IN_BLOCKCHAIN"
-        is_valid = True  # Valido pero sin registro
-        result_message = "Mensaje descifrado correctamente pero no esta registrado en la blockchain."
+        # Firma válida pero no está en blockchain
+        signature_status = "SIGNATURE_VALID_NO_BLOCKCHAIN"
+        is_valid = True
+        message.verification_status = "VERIFIED"
+        result_message = "✓ Firma digital verificada correctamente. Nota: Mensaje no encontrado en blockchain."
+
+    # Guardar el estado de verificación actualizado
+    db.commit()
 
     return MessageVerifyResponse(
         message_id=message_id,
@@ -328,3 +423,37 @@ def verify_message_with_decryption(
         blockchain_registered=blockchain_registered,
         message=result_message,
     )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint de Alertas de Seguridad
+# ---------------------------------------------------------------------------
+
+@router.get("/alerts/me")
+def get_my_security_alerts(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    GET /messages/alerts/me
+    
+    Obtiene todas las alertas de seguridad para el usuario actual.
+    Incluye alertas de firmas inválidas, hash mismatch, etc.
+    """
+    alerts = AlertService.get_alerts_for_user(current_user.id)
+    return {
+        "user_id": current_user.id,
+        "total_alerts": len(alerts),
+        "critical_count": len([a for a in alerts if a.is_critical]),
+        "alerts": [
+            {
+                "type": alert.alert_type.value,
+                "message_id": alert.message_id,
+                "sender_id": alert.sender_id,
+                "recipient_id": alert.recipient_id,
+                "description": alert.description,
+                "timestamp": alert.timestamp,
+                "is_critical": alert.is_critical,
+            }
+            for alert in alerts
+        ],
+    }
