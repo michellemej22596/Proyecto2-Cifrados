@@ -7,7 +7,7 @@ API_BASE = "http://localhost:8000"
 # CONFIG
 # =========================
 st.set_page_config(
-    page_title="Crypto Users",
+    page_title="VaultChain - Mensajeria Segura",
     page_icon="🔐",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -76,6 +76,28 @@ st.markdown("""
         font-weight: 600;
         margin-bottom: 0.75rem;
     }
+    
+    .badge-red {
+        display: inline-block;
+        padding: 0.35rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(239, 68, 68, 0.15);
+        color: #fca5a5;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+    }
+    
+    .badge-yellow {
+        display: inline-block;
+        padding: 0.35rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(234, 179, 8, 0.15);
+        color: #fde047;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+    }
 
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
@@ -135,6 +157,62 @@ st.markdown("""
         font-size: 1rem;
         word-break: break-all;
     }
+    
+    .signature-box {
+        background: #1e1b4b;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        border-radius: 12px;
+        padding: 1rem;
+        color: #c4b5fd;
+        font-size: 0.85rem;
+        word-break: break-all;
+    }
+    
+    .blockchain-box {
+        background: #172554;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-radius: 12px;
+        padding: 1rem;
+        color: #93c5fd;
+        font-size: 0.85rem;
+        word-break: break-all;
+    }
+    
+    .alert-box-critical {
+        background: #450a0a;
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        border-radius: 12px;
+        padding: 1rem;
+        color: #fca5a5;
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .alert-box-warning {
+        background: #422006;
+        border: 1px solid rgba(234, 179, 8, 0.5);
+        border-radius: 12px;
+        padding: 1rem;
+        color: #fde047;
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .verified-box {
+        background: #052e16;
+        border: 2px solid rgba(34, 197, 94, 0.5);
+        border-radius: 12px;
+        padding: 1rem;
+        color: #86efac;
+    }
+    
+    .not-verified-box {
+        background: #450a0a;
+        border: 2px solid rgba(239, 68, 68, 0.5);
+        border-radius: 12px;
+        padding: 1rem;
+        color: #fca5a5;
+    }
 
     .footer-note {
         text-align: center;
@@ -148,9 +226,9 @@ st.markdown("""
 # =========================
 # HEADER
 # =========================
-st.markdown('<div class="main-title">🔐 Crypto Users</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">VaultChain</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="subtitle">Registro - Autenticación - Mensajería cifrada</div>',
+    '<div class="subtitle">Sistema de Mensajeria Segura con Registro Inmutable</div>',
     unsafe_allow_html=True
 )
 
@@ -162,6 +240,9 @@ if "access_token" not in st.session_state:
 
 if "token_type" not in st.session_state:
     st.session_state["token_type"] = None
+    
+if "user_password" not in st.session_state:
+    st.session_state["user_password"] = None
 
 def auth_headers():
     return {"Authorization": f"Bearer {st.session_state['access_token']}"}
@@ -189,14 +270,17 @@ def load_groups(headers):
 # =========================
 # TABS
 # =========================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📝 Registro",
-    "🔑 Login",
-    "📨 Enviar mensaje",
-    "📬 Ver mensajes",
-    "🔓 Descifrar",
-    "👥 Grupos",
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "Registro",
+    "Login",
+    "Enviar",
+    "Mensajes",
+    "Descifrar",
+    "Verificar",
+    "Alertas",
+    "Blockchain",
 ])
+
 # =========================
 # REGISTRO
 # =========================
@@ -205,19 +289,19 @@ with tab1:
     st.markdown('<div class="badge">Nuevo usuario</div>', unsafe_allow_html=True)
     st.subheader("Crear cuenta")
 
-    st.caption("Completa tus datos para registrar un usuario y generar automáticamente su par de llaves.")
+    st.caption("Completa tus datos para registrar un usuario y generar automaticamente su par de llaves RSA.")
 
     with st.form("register_form"):
         col1, col2 = st.columns(2)
 
         with col1:
-            name = st.text_input("Nombre completo", placeholder="Juan Pérez")
+            name = st.text_input("Nombre completo", placeholder="Juan Perez")
 
         with col2:
-            email = st.text_input("Correo electrónico", placeholder="juan@ejemplo.com")
+            email = st.text_input("Correo electronico", placeholder="juan@ejemplo.com")
 
-        password = st.text_input("Contraseña", type="password", placeholder="Mínimo 8 caracteres")
-        password_confirm = st.text_input("Confirmar contraseña", type="password")
+        password = st.text_input("Contrasena", type="password", placeholder="Minimo 8 caracteres")
+        password_confirm = st.text_input("Confirmar contrasena", type="password")
 
         submitted = st.form_submit_button("Registrarse")
 
@@ -225,11 +309,11 @@ with tab1:
         if not name or not email or not password or not password_confirm:
             st.error("Completa todos los campos.")
         elif len(password) < 8:
-            st.error("La contraseña debe tener al menos 8 caracteres.")
+            st.error("La contrasena debe tener al menos 8 caracteres.")
         elif password != password_confirm:
-            st.error("Las contraseñas no coinciden.")
+            st.error("Las contrasenas no coinciden.")
         else:
-            with st.spinner("Registrando usuario y generando llaves..."):
+            with st.spinner("Registrando usuario y generando llaves RSA..."):
                 try:
                     response = requests.post(
                         f"{API_BASE}/auth/register",
@@ -252,31 +336,31 @@ with tab1:
                         st.write(f"**ID:** {data['id']}")
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                        with st.expander("Ver llave pública generada"):
+                        with st.expander("Ver llave publica generada (RSA)"):
                             st.code(data["public_key_pem"], language="text")
 
                         st.info(
                             "La llave privada fue cifrada de forma segura con una clave derivada "
-                            "de la contraseña usando PBKDF2-HMAC-SHA256."
+                            "de la contrasena usando PBKDF2-HMAC-SHA256. Esta llave se usara para firmar digitalmente tus mensajes."
                         )
 
                     elif response.status_code == 409:
-                        st.error("Ese correo electrónico ya está registrado.")
+                        st.error("Ese correo electronico ya esta registrado.")
                     elif response.status_code == 422:
                         errors = response.json().get("detail", [])
                         for err in errors:
                             campo = err.get("loc", ["campo"])[-1]
-                            mensaje = err.get("msg", "Valor inválido")
+                            mensaje = err.get("msg", "Valor invalido")
                             st.error(f"{campo}: {mensaje}")
                     else:
                         st.error(f"Error del servidor ({response.status_code}): {response.text}")
 
                 except requests.exceptions.ConnectionError:
-                    st.error("No se pudo conectar con el backend. Verifica que esté corriendo en localhost:8000.")
+                    st.error("No se pudo conectar con el backend. Verifica que este corriendo en localhost:8000.")
                 except requests.exceptions.Timeout:
-                    st.error("El backend tardó demasiado en responder.")
+                    st.error("El backend tardo demasiado en responder.")
                 except Exception as e:
-                    st.error(f"Ocurrió un error inesperado: {e}")
+                    st.error(f"Ocurrio un error inesperado: {e}")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -285,20 +369,20 @@ with tab1:
 # =========================
 with tab2:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="badge">Autenticación</div>', unsafe_allow_html=True)
-    st.subheader("Iniciar sesión")
+    st.markdown('<div class="badge">Autenticacion</div>', unsafe_allow_html=True)
+    st.subheader("Iniciar sesion")
 
     st.caption("Ingresa tus credenciales para autenticarte y recibir un token JWT.")
 
     with st.form("login_form"):
-        login_email = st.text_input("Correo electrónico", placeholder="juan@ejemplo.com", key="login_email")
-        login_password = st.text_input("Contraseña", type="password", key="login_password")
+        login_email = st.text_input("Correo electronico", placeholder="juan@ejemplo.com", key="login_email")
+        login_password = st.text_input("Contrasena", type="password", key="login_password")
 
-        login_submitted = st.form_submit_button("Iniciar sesión")
+        login_submitted = st.form_submit_button("Iniciar sesion")
 
     if login_submitted:
         if not login_email or not login_password:
-            st.error("Debes ingresar correo y contraseña.")
+            st.error("Debes ingresar correo y contrasena.")
         else:
             with st.spinner("Validando credenciales..."):
                 try:
@@ -315,6 +399,7 @@ with tab2:
                         data = response.json()
                         st.session_state["access_token"] = data["access_token"]
                         st.session_state["token_type"] = data["token_type"]
+                        st.session_state["user_password"] = login_password
 
                         st.success("Login exitoso.")
 
@@ -327,104 +412,132 @@ with tab2:
                         st.markdown('</div>', unsafe_allow_html=True)
 
                     elif response.status_code == 401:
-                        st.error("Credenciales inválidas.")
+                        st.error("Credenciales invalidas.")
                     elif response.status_code == 422:
                         errors = response.json().get("detail", [])
                         for err in errors:
                             campo = err.get("loc", ["campo"])[-1]
-                            mensaje = err.get("msg", "Valor inválido")
+                            mensaje = err.get("msg", "Valor invalido")
                             st.error(f"{campo}: {mensaje}")
                     else:
                         st.error(f"Error del servidor ({response.status_code}): {response.text}")
 
                 except requests.exceptions.ConnectionError:
-                    st.error("No se pudo conectar con el backend. Verifica que esté corriendo en localhost:8000.")
+                    st.error("No se pudo conectar con el backend. Verifica que este corriendo en localhost:8000.")
                 except requests.exceptions.Timeout:
-                    st.error("El backend tardó demasiado en responder.")
+                    st.error("El backend tardo demasiado en responder.")
                 except Exception as e:
-                    st.error(f"Ocurrió un error inesperado: {e}")
+                    st.error(f"Ocurrio un error inesperado: {e}")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
-# SESIÓN ACTIVA
+# SESION ACTIVA
 # =========================
 if st.session_state.get("access_token"):
     with st.sidebar:
-        st.markdown("### Sesión activa")
+        st.markdown("### Sesion activa")
         st.success("Autenticado")
         with st.expander("Ver token"):
             st.markdown(
                 f'<div class="token-box">{st.session_state["access_token"]}</div>',
                 unsafe_allow_html=True
             )
-        if st.button("Cerrar sesión"):
+        if st.button("Cerrar sesion"):
             st.session_state["access_token"] = None
             st.session_state["token_type"] = None
+            st.session_state["user_password"] = None
             st.rerun()
 
 # =========================
-# ENVIAR MENSAJE
+# ENVIAR MENSAJE (CON FIRMA DIGITAL)
 # =========================
 with tab3:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="badge">Requiere sesión activa</div>', unsafe_allow_html=True)
-    st.subheader("Enviar mensaje cifrado")
+    st.markdown('<div class="badge">Firma Digital + Blockchain</div>', unsafe_allow_html=True)
+    st.subheader("Enviar mensaje cifrado y firmado")
     st.caption(
-        "Genera una clave AES-256 efímera, cifra el mensaje con AES-256-GCM "
-        "y cifra la clave con la llave pública RSA-OAEP del destinatario."
+        "El mensaje sera firmado digitalmente con tu llave privada RSA (RSA-PSS), "
+        "cifrado con AES-256-GCM y registrado automaticamente en la blockchain."
     )
 
     if not st.session_state.get("access_token"):
-        st.warning("Inicia sesión en la pestaña **Login** para enviar mensajes.")
+        st.warning("Inicia sesion en la pestana **Login** para enviar mensajes.")
     else:
         with st.form("hybrid_form"):
             recipient_id = st.number_input(
                 "ID del destinatario",
                 min_value=1,
                 step=1,
-                help="El ID numérico del usuario que recibirá el mensaje.",
+                help="El ID numerico del usuario que recibira el mensaje.",
             )
             hybrid_content = st.text_area("Mensaje", placeholder="Escribe tu mensaje...", key="hybrid_content")
-            hybrid_submitted = st.form_submit_button("Cifrar y enviar")
+            sender_password = st.text_input(
+                "Tu contrasena (para firmar)",
+                type="password",
+                value=st.session_state.get("user_password", ""),
+                help="Necesaria para desbloquear tu llave privada RSA y firmar el mensaje."
+            )
+            hybrid_submitted = st.form_submit_button("Firmar, Cifrar y Enviar")
 
         if hybrid_submitted:
             if not hybrid_content.strip():
-                st.error("El mensaje no puede estar vacío.")
+                st.error("El mensaje no puede estar vacio.")
+            elif not sender_password:
+                st.error("Debes ingresar tu contrasena para firmar el mensaje.")
             else:
-                with st.spinner("Generando clave efímera y cifrando con RSA-OAEP..."):
+                with st.spinner("Firmando con RSA-PSS, cifrando con AES-256-GCM y registrando en blockchain..."):
                     try:
                         response = requests.post(
                             f"{API_BASE}/messages/hybrid/",
-                            json={"content": hybrid_content, "recipient_id": int(recipient_id)},
+                            json={
+                                "content": hybrid_content, 
+                                "recipient_id": int(recipient_id),
+                                "password": sender_password
+                            },
                             headers=auth_headers(),
                             timeout=15,
                         )
                         if response.status_code == 201:
                             data = response.json()
-                            st.success(f"Mensaje enviado. ID: **{data['id']}**")
+                            st.success(f"Mensaje enviado y registrado en blockchain. ID: **{data['id']}**")
+                            
                             st.markdown('<div class="mini-card">', unsafe_allow_html=True)
-                            st.markdown("**Detalles del cifrado**")
+                            st.markdown("**Detalles del mensaje**")
                             col1, col2 = st.columns(2)
                             with col1:
                                 st.write(f"**Remitente ID:** {data.get('sender_id')}")
+                                st.write(f"**Estado:** {data.get('verification_status', 'PENDING')}")
                             with col2:
                                 st.write(f"**Destinatario ID:** {data.get('recipient_id')}")
-                            st.text(f"Ciphertext (Base64):\n{data['ciphertext']}")
-                            st.text(f"Nonce (Base64):\n{data['nonce']}")
-                            st.text(f"Auth Tag (GCM):\n{data.get('auth_tag', '')}")
-                            st.text(f"Clave AES cifrada (RSA-OAEP):\n{data.get('encrypted_key', '')}")
                             st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            # Mostrar firma digital
+                            if data.get('signature'):
+                                with st.expander("Ver Firma Digital (RSA-PSS)"):
+                                    st.markdown(
+                                        f'<div class="signature-box">{data["signature"][:100]}...</div>',
+                                        unsafe_allow_html=True
+                                    )
+                                    st.caption("La firma digital garantiza que el mensaje fue enviado por ti y no ha sido alterado.")
+                            
+                            # Mostrar datos cifrados
+                            with st.expander("Ver datos cifrados"):
+                                st.text(f"Ciphertext (Base64):\n{data['ciphertext'][:80]}...")
+                                st.text(f"Nonce (Base64):\n{data['nonce']}")
+                                st.text(f"Auth Tag (GCM):\n{data.get('auth_tag', '')}")
+                                st.text(f"Clave AES cifrada (RSA-OAEP):\n{data.get('encrypted_key', '')[:80]}...")
+                            
                             st.info(
-                                f"Guarda el ID **{data['id']}** para que el destinatario "
-                                "pueda descifrar el mensaje en la pestaña Descifrar."
+                                f"El mensaje #{data['id']} ha sido registrado en la blockchain para garantizar "
+                                "su trazabilidad e inmutabilidad. El destinatario puede verificar su autenticidad."
                             )
                         elif response.status_code == 404:
                             st.error("Destinatario no encontrado. Verifica el ID.")
                         elif response.status_code == 401:
-                            st.error("Sesión expirada. Vuelve a iniciar sesión.")
+                            st.error("Sesion expirada o contrasena incorrecta. Vuelve a iniciar sesion.")
                         elif response.status_code == 422:
-                            st.error("Datos inválidos.")
+                            st.error("Datos invalidos.")
                         else:
                             st.error(f"Error ({response.status_code}): {response.text}")
                     except requests.exceptions.ConnectionError:
@@ -440,13 +553,13 @@ with tab3:
 with tab4:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Mensajes almacenados")
-    st.caption("Lista todos los mensajes cifrados guardados en el servidor.")
+    st.caption("Lista todos los mensajes cifrados con su estado de verificacion.")
 
     if st.button("Actualizar lista"):
         st.rerun()
 
     if not st.session_state.get("access_token"):
-        st.warning("Inicia sesión en la pestaña **Login** para ver tus mensajes.")
+        st.warning("Inicia sesion en la pestana **Login** para ver tus mensajes.")
     else:
         try:
             response = requests.get(
@@ -457,16 +570,35 @@ with tab4:
             if response.status_code == 200:
                 messages = response.json()
                 if not messages:
-                    st.info("No hay mensajes aún. Envía uno desde la pestaña Enviar mensaje.")
+                    st.info("No hay mensajes aun. Envia uno desde la pestana Enviar.")
                 else:
                     st.write(f"**{len(messages)} mensaje(s) encontrado(s)**")
                     for msg in messages:
-                        label = f"Mensaje #{msg['id']} — De: {msg.get('sender_id', '?')} → Para: {msg.get('recipient_id', '?')}"
+                        # Determinar icono segun estado de verificacion
+                        status = msg.get('verification_status', 'PENDING')
+                        if status == 'VERIFIED':
+                            status_icon = "[VERIFICADO]"
+                            status_class = "badge-green"
+                        elif status == 'NOT_VERIFIED':
+                            status_icon = "[NO VERIFICADO]"
+                            status_class = "badge-red"
+                        else:
+                            status_icon = "[PENDIENTE]"
+                            status_class = "badge-yellow"
+                        
+                        label = f"Mensaje #{msg['id']} - De: {msg.get('sender_id', '?')} -> Para: {msg.get('recipient_id', '?')} {status_icon}"
                         with st.expander(label):
-                            st.text(f"Ciphertext (Base64):\n{msg['ciphertext']}")
+                            st.markdown(f'<div class="{status_class}">{status}</div>', unsafe_allow_html=True)
+                            
+                            if msg.get('signature'):
+                                st.markdown("**Firma Digital:** Presente")
+                                st.text(f"Firma (primeros 60 chars):\n{msg['signature'][:60]}...")
+                            else:
+                                st.markdown("**Firma Digital:** No presente")
+                            
+                            st.text(f"Ciphertext (Base64):\n{msg['ciphertext'][:60]}...")
                             st.text(f"Nonce (Base64):\n{msg['nonce']}")
                             st.text(f"Auth Tag (GCM):\n{msg.get('auth_tag', '')}")
-                            st.text(f"Clave AES cifrada (RSA-OAEP):\n{msg.get('encrypted_key', '')}")
             else:
                 st.error(f"Error al obtener mensajes ({response.status_code}).")
         except requests.exceptions.ConnectionError:
@@ -481,33 +613,34 @@ with tab4:
 # =========================
 with tab5:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="badge">Requiere sesión activa</div>', unsafe_allow_html=True)
-    st.subheader("Descifrar mensaje híbrido")
+    st.markdown('<div class="badge">Descifrado RSA-OAEP + AES-GCM</div>', unsafe_allow_html=True)
+    st.subheader("Descifrar mensaje")
     st.caption(
-        "Usa tu llave privada RSA (protegida con tu contraseña) para recuperar "
-        "la clave AES efímera y descifrar el mensaje."
+        "Usa tu llave privada RSA (protegida con tu contrasena) para recuperar "
+        "la clave AES efimera y descifrar el mensaje."
     )
 
     if not st.session_state.get("access_token"):
-        st.warning("Inicia sesión en la pestaña **Login** para descifrar mensajes.")
+        st.warning("Inicia sesion en la pestana **Login** para descifrar mensajes.")
     else:
         with st.form("decrypt_form"):
             decrypt_msg_id = st.number_input(
                 "ID del mensaje",
                 min_value=1,
                 step=1,
-                help="El ID del mensaje híbrido que quieres descifrar.",
+                help="El ID del mensaje hibrido que quieres descifrar.",
             )
             decrypt_password = st.text_input(
-                "Tu contraseña",
+                "Tu contrasena",
                 type="password",
+                value=st.session_state.get("user_password", ""),
                 help="Necesaria para desbloquear tu llave privada RSA.",
             )
             decrypt_submitted = st.form_submit_button("Descifrar")
 
         if decrypt_submitted:
             if not decrypt_password:
-                st.error("Ingresa tu contraseña.")
+                st.error("Ingresa tu contrasena.")
             else:
                 with st.spinner("Descifrando con RSA-OAEP + AES-256-GCM..."):
                     try:
@@ -521,17 +654,17 @@ with tab5:
                             data = response.json()
                             st.success("Mensaje descifrado exitosamente.")
                             st.markdown(
-                                f'<div class="plaintext-box">📩 {data["plaintext"]}</div>',
+                                f'<div class="plaintext-box">{data["plaintext"]}</div>',
                                 unsafe_allow_html=True,
                             )
                         elif response.status_code == 403:
                             st.error("No eres el destinatario de este mensaje.")
                         elif response.status_code == 401:
-                            st.error("Contraseña incorrecta o sesión expirada.")
+                            st.error("Contrasena incorrecta o sesion expirada.")
                         elif response.status_code == 404:
                             st.error("Mensaje no encontrado.")
                         elif response.status_code == 400:
-                            st.error("Este mensaje no usa cifrado híbrido.")
+                            st.error("Este mensaje no usa cifrado hibrido.")
                         else:
                             st.error(f"Error ({response.status_code}): {response.text}")
                     except requests.exceptions.ConnectionError:
@@ -542,187 +675,250 @@ with tab5:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
-# MENSAJERÍA GRUPAL
+# VERIFICAR FIRMA DIGITAL
 # =========================
 with tab6:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="badge">Requiere sesión activa</div>', unsafe_allow_html=True)
-    st.subheader("Mensajería grupal cifrada")
+    st.markdown('<div class="badge">Verificacion de Integridad</div>', unsafe_allow_html=True)
+    st.subheader("Verificar mensaje")
+    st.caption(
+        "Verifica la firma digital del mensaje usando la llave publica del remitente "
+        "y comprueba el registro en la blockchain."
+    )
 
     if not st.session_state.get("access_token"):
-        st.warning("Inicia sesión en la pestaña **Login** para usar mensajería grupal.")
+        st.warning("Inicia sesion en la pestana **Login** para verificar mensajes.")
     else:
-        headers = auth_headers()
+        with st.form("verify_form"):
+            verify_msg_id = st.number_input(
+                "ID del mensaje a verificar",
+                min_value=1,
+                step=1,
+                help="El ID del mensaje que deseas verificar.",
+            )
+            verify_password = st.text_input(
+                "Tu contrasena (para descifrar y verificar)",
+                type="password",
+                value=st.session_state.get("user_password", ""),
+                help="Necesaria para descifrar el mensaje y verificar su contenido.",
+            )
+            verify_submitted = st.form_submit_button("Verificar Firma y Blockchain")
 
-        users_list = load_users()
-        users_by_id = {u["id"]: u for u in users_list}
-
-        groups_list = load_groups(headers)
-        group_options = {g["name"]: g["id"] for g in groups_list}
-
-        group_tab1, group_tab2, group_tab3, group_tab4 = st.tabs([
-            "➕ Crear grupo",
-            "📤 Enviar",
-            "📥 Ver mensajes",
-            "🔓 Descifrar",
-        ])
-
-        with group_tab1:
-            st.markdown("### Crear nuevo grupo")
-
-            if users_list:
-                with st.expander("Ver usuarios disponibles"):
-                    for user in users_list:
-                        st.write(f"- {user['name']} ({user['email']})")
-
-            with st.form("create_group_form"):
-                group_name = st.text_input("Nombre del grupo", placeholder="Equipo Proyecto")
-                member_names_text = st.text_input(
-                    "Nombres de miembros",
-                    placeholder="Michelle, Daniela, Carlos"
-                )
-                create_group_submitted = st.form_submit_button("Crear grupo")
-
-            if create_group_submitted:
-                member_names = [
-                    name.strip()
-                    for name in member_names_text.split(",")
-                    if name.strip()
-                ]
-
-                response = requests.post(
-                    f"{API_BASE}/groups/",
-                    json={"name": group_name, "member_names": member_names},
-                    headers=headers,
-                    timeout=15,
-                )
-
-                if response.status_code == 201:
-                    data = response.json()
-                    owner_name = users_by_id.get(data["owner_id"], {}).get("name", "Usuario actual")
-
-                    st.success("Grupo creado correctamente.")
-                    st.write(f"**Grupo:** {data['name']}")
-                    st.write(f"**Propietario:** {owner_name}")
-
-                else:
-                    st.error(f"Error ({response.status_code}): {response.text}")
-
-        with group_tab2:
-            st.markdown("### Enviar mensaje al grupo")
-
-            if not group_options:
-                st.warning("No tienes grupos disponibles. Crea uno primero.")
+        if verify_submitted:
+            if not verify_password:
+                st.error("Ingresa tu contrasena.")
             else:
-                with st.form("send_group_message_form"):
-                    selected_group_name = st.selectbox("Grupo", options=list(group_options.keys()))
-                    group_message_content = st.text_area("Mensaje")
-                    group_password = st.text_input("Tu contraseña", type="password")
-                    send_submitted = st.form_submit_button("Cifrar y enviar")
-
-                if send_submitted:
-                    group_id = group_options[selected_group_name]
-
-                    response = requests.post(
-                        f"{API_BASE}/groups/{group_id}/messages",
-                        json={
-                            "content": group_message_content,
-                            "password": group_password,
-                        },
-                        headers=headers,
-                        timeout=15,
-                    )
-
-                    if response.status_code == 201:
-                        data = response.json()
-                        sender_name = users_by_id.get(data["sender_id"], {}).get("name", "Desconocido")
-
-                        st.success("Mensaje enviado correctamente.")
-                        st.write(f"**Grupo:** {selected_group_name}")
-                        st.write(f"**Remitente:** {sender_name}")
-                        st.text(f"Ciphertext:\n{data['ciphertext']}")
-                        st.text(f"Nonce:\n{data['nonce']}")
-
-                    else:
-                        st.error(f"Error ({response.status_code}): {response.text}")
-
-        with group_tab3:
-            st.markdown("### Ver mensajes del grupo")
-
-            if not group_options:
-                st.warning("No tienes grupos disponibles.")
-            else:
-                selected_group_name = st.selectbox(
-                    "Grupo",
-                    options=list(group_options.keys()),
-                    key="view_group_name"
-                )
-
-                if st.button("Cargar mensajes"):
-                    group_id = group_options[selected_group_name]
-
-                    response = requests.get(
-                        f"{API_BASE}/groups/{group_id}/messages",
-                        headers=headers,
-                        timeout=10,
-                    )
-
-                    if response.status_code == 200:
-                        messages = response.json()
-
-                        if not messages:
-                            st.info("Este grupo no tiene mensajes.")
-                        else:
-                            for msg in messages:
-                                sender_name = users_by_id.get(msg["sender_id"], {}).get("name", "Desconocido")
-
-                                with st.expander(f"Mensaje #{msg['id']}"):
-                                    st.write(f"**Grupo:** {selected_group_name}")
-                                    st.write(f"**Remitente:** {sender_name}")
-                                    st.text(f"Ciphertext:\n{msg['ciphertext']}")
-                                    st.text(f"Nonce:\n{msg['nonce']}")
-                    else:
-                        st.error(f"Error ({response.status_code}): {response.text}")
-
-        with group_tab4:
-            st.markdown("### Descifrar mensaje grupal")
-
-            if not group_options:
-                st.warning("No tienes grupos disponibles.")
-            else:
-                with st.form("decrypt_group_message_form"):
-                    selected_group_name = st.selectbox(
-                        "Grupo",
-                        options=list(group_options.keys()),
-                        key="decrypt_group_name"
-                    )
-                    message_id = st.number_input("Número del mensaje", min_value=1, step=1)
-                    password = st.text_input("Tu contraseña", type="password")
-                    decrypt_submitted = st.form_submit_button("Descifrar")
-
-                if decrypt_submitted:
-                    group_id = group_options[selected_group_name]
-
-                    response = requests.post(
-                        f"{API_BASE}/groups/{group_id}/messages/{int(message_id)}/decrypt",
-                        json={"password": password},
-                        headers=headers,
-                        timeout=15,
-                    )
-
-                    if response.status_code == 200:
-                        data = response.json()
-                        st.success("Mensaje descifrado correctamente.")
-                        st.markdown(
-                            f'<div class="plaintext-box">👥 {data["plaintext"]}</div>',
-                            unsafe_allow_html=True,
+                with st.spinner("Verificando firma digital y registro en blockchain..."):
+                    try:
+                        response = requests.post(
+                            f"{API_BASE}/messages/{int(verify_msg_id)}/verify",
+                            json={"password": verify_password},
+                            headers=auth_headers(),
+                            timeout=15,
                         )
-                    else:
-                        st.error(f"Error ({response.status_code}): {response.text}")
+                        if response.status_code == 200:
+                            data = response.json()
+                            
+                            # Mostrar resultado de verificacion
+                            if data.get("is_signature_valid"):
+                                st.markdown(
+                                    '<div class="verified-box">'
+                                    '<strong>VERIFICADO</strong><br>'
+                                    'La firma digital es valida y el mensaje esta registrado en blockchain.'
+                                    '</div>',
+                                    unsafe_allow_html=True
+                                )
+                            else:
+                                st.markdown(
+                                    f'<div class="not-verified-box">'
+                                    f'<strong>NO VERIFICADO</strong><br>'
+                                    f'{data.get("message", "La verificacion fallo.")}'
+                                    f'</div>',
+                                    unsafe_allow_html=True
+                                )
+                            
+                            st.markdown('<div class="mini-card">', unsafe_allow_html=True)
+                            st.markdown("**Detalles de verificacion**")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Message ID:** {data.get('message_id')}")
+                                st.write(f"**Remitente ID:** {data.get('sender_id')}")
+                                st.write(f"**Destinatario ID:** {data.get('recipient_id')}")
+                            with col2:
+                                st.write(f"**Estado firma:** {data.get('signature_status')}")
+                                st.write(f"**En Blockchain:** {'Si' if data.get('blockchain_registered') else 'No'}")
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            # Mostrar mensaje descifrado si la verificacion fue exitosa
+                            if data.get("plaintext"):
+                                with st.expander("Ver mensaje descifrado"):
+                                    st.markdown(
+                                        f'<div class="plaintext-box">{data["plaintext"]}</div>',
+                                        unsafe_allow_html=True
+                                    )
+                            
+                        elif response.status_code == 403:
+                            st.error("No eres el destinatario de este mensaje.")
+                        elif response.status_code == 401:
+                            st.error("Contrasena incorrecta o sesion expirada.")
+                        elif response.status_code == 404:
+                            st.error("Mensaje no encontrado.")
+                        else:
+                            st.error(f"Error ({response.status_code}): {response.text}")
+                    except requests.exceptions.ConnectionError:
+                        st.error("No se pudo conectar con el backend.")
+                    except Exception as e:
+                        st.error(f"Error inesperado: {e}")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# =========================
+# ALERTAS DE SEGURIDAD
+# =========================
+with tab7:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="badge-red">Alertas de Seguridad</div>', unsafe_allow_html=True)
+    st.subheader("Centro de Alertas")
+    st.caption(
+        "Aqui se muestran las alertas de seguridad cuando se detectan firmas invalidas, "
+        "mensajes alterados o problemas de integridad."
+    )
+
+    if not st.session_state.get("access_token"):
+        st.warning("Inicia sesion en la pestana **Login** para ver tus alertas.")
+    else:
+        if st.button("Actualizar alertas", key="refresh_alerts"):
+            st.rerun()
+            
+        try:
+            response = requests.get(
+                f"{API_BASE}/messages/alerts/me",
+                headers=auth_headers(),
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                total = data.get("total_alerts", 0)
+                critical = data.get("critical_count", 0)
+                
+                if total == 0:
+                    st.success("No tienes alertas de seguridad. Todos tus mensajes estan seguros.")
+                else:
+                    st.warning(f"Tienes **{total}** alerta(s) de seguridad, **{critical}** critica(s).")
+                    
+                    for alert in data.get("alerts", []):
+                        alert_type = alert.get("type", "UNKNOWN")
+                        is_critical = alert.get("is_critical", False)
+                        
+                        box_class = "alert-box-critical" if is_critical else "alert-box-warning"
+                        
+                        st.markdown(
+                            f'<div class="{box_class}">'
+                            f'<strong>{"[CRITICO]" if is_critical else "[ADVERTENCIA]"} {alert_type}</strong><br>'
+                            f'Mensaje ID: {alert.get("message_id")}<br>'
+                            f'Remitente ID: {alert.get("sender_id")} | Destinatario ID: {alert.get("recipient_id")}<br>'
+                            f'{alert.get("description", "")}<br>'
+                            f'<small>{alert.get("timestamp", "")}</small>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+            else:
+                st.error(f"Error al obtener alertas ({response.status_code}).")
+        except requests.exceptions.ConnectionError:
+            st.error("No se pudo conectar con el backend.")
+        except Exception as e:
+            st.error(f"Error inesperado: {e}")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# =========================
+# BLOCKCHAIN
+# =========================
+with tab8:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="badge">Registro Inmutable</div>', unsafe_allow_html=True)
+    st.subheader("Explorador de Blockchain")
+    st.caption(
+        "Visualiza la cadena de bloques que registra todas las transacciones de mensajes. "
+        "Cada bloque contiene: indice, timestamp, datos de transaccion, hash anterior y nonce."
+    )
+
+    if st.button("Cargar Blockchain", key="load_blockchain"):
+        try:
+            response = requests.get(
+                f"{API_BASE}/blockchain/",
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                chain = data.get("chain", [])
+                
+                st.write(f"**Longitud de la cadena:** {data.get('length', len(chain))} bloques")
+                
+                for block in chain:
+                    block_index = block.get("index", "?")
+                    is_genesis = block_index == 0
+                    
+                    label = f"Bloque #{block_index}" + (" (Genesis)" if is_genesis else "")
+                    with st.expander(label):
+                        st.markdown('<div class="blockchain-box">', unsafe_allow_html=True)
+                        st.write(f"**Indice:** {block.get('index')}")
+                        st.write(f"**Timestamp:** {block.get('timestamp')}")
+                        st.write(f"**Nonce:** {block.get('nonce')}")
+                        
+                        # Mostrar datos de transaccion (cada bloque = 1 transaccion)
+                        sender = block.get("sender_id", "N/A")
+                        recipient = block.get("recipient_id", "N/A")
+                        msg_hash = block.get("message_hash", "")
+                        
+                        if sender != "N/A" and sender != "0":
+                            st.write(f"**Remitente ID:** {sender}")
+                            st.write(f"**Destinatario ID:** {recipient}")
+                            st.write(f"**Hash del mensaje:** {msg_hash[:50]}..." if len(msg_hash) > 50 else f"**Hash del mensaje:** {msg_hash}")
+                        else:
+                            st.write("**Transaccion:** Ninguna (bloque genesis)")
+                        
+                        st.text(f"Hash anterior:\n{block.get('previous_hash', '')}")
+                        st.text(f"Hash actual:\n{block.get('hash', '')}")
+                        st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.error(f"Error al obtener blockchain ({response.status_code}).")
+        except requests.exceptions.ConnectionError:
+            st.error("No se pudo conectar con el backend.")
+        except Exception as e:
+            st.error(f"Error inesperado: {e}")
+    
+    # Verificar integridad de la cadena
+    st.markdown("---")
+    st.subheader("Verificar Integridad")
+    st.caption("Verifica que todos los bloques de la cadena esten correctamente encadenados.")
+    
+    if st.button("Verificar Cadena", key="verify_chain"):
+        try:
+            response = requests.get(
+                f"{API_BASE}/blockchain/verify",
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("is_valid"):
+                    st.success(f"La blockchain es VALIDA. {data.get('total_blocks', 0)} bloques verificados correctamente.")
+                    st.write(data.get("message", ""))
+                else:
+                    st.error("La blockchain es INVALIDA. Se ha detectado una alteracion en la cadena.")
+                    st.write(data.get("message", ""))
+            else:
+                st.error(f"Error al verificar ({response.status_code}).")
+        except requests.exceptions.ConnectionError:
+            st.error("No se pudo conectar con el backend.")
+        except Exception as e:
+            st.error(f"Error inesperado: {e}")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="footer-note">Proyecto de criptografía</div>',
+    '<div class="footer-note">VaultChain - Sistema de Mensajeria Segura con Registro Inmutable</div>',
     unsafe_allow_html=True
 )
