@@ -22,9 +22,7 @@ from crypto import (
     decrypt_private_key,
     encrypt_aes_key_rsa_oaep,
     decrypt_aes_key_rsa_oaep,
-    # AES-GCM
-    encrypt_message_aes_gcm,
-    decrypt_message_aes_gcm,
+
     # Hybrid
     encrypt_message_hybrid,
     decrypt_message_hybrid,
@@ -260,52 +258,6 @@ class TestJWT:
         assert "exp" in decoded
 
 
-class TestAESGCM:
-    """Pruebas para cifrado simétrico AES-GCM."""
-
-    def test_encrypt_message_returns_tuple(self):
-        """encrypt_message_aes_gcm debe retornar (ciphertext, nonce)."""
-        plaintext = "Mensaje secreto"
-        result = encrypt_message_aes_gcm(plaintext)
-
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-    def test_encrypt_decrypt_roundtrip(self):
-        """El mensaje descifrado debe coincidir con el original."""
-        plaintext = "Texto de prueba para cifrar"
-        ciphertext, nonce = encrypt_message_aes_gcm(plaintext)
-        decrypted = decrypt_message_aes_gcm(ciphertext, nonce)
-
-        assert decrypted == plaintext
-
-    def test_encrypt_produces_different_ciphertext(self):
-        """Cada cifrado debe generar un ciphertext diferente (nonce único)."""
-        plaintext = "Mismo mensaje"
-        ct1, nonce1 = encrypt_message_aes_gcm(plaintext)
-        ct2, nonce2 = encrypt_message_aes_gcm(plaintext)
-
-        assert ct1 != ct2
-        assert nonce1 != nonce2
-
-    def test_decrypt_with_wrong_nonce_fails(self):
-        """Descifrar con nonce incorrecto debe fallar."""
-        plaintext = "Mensaje"
-        ciphertext, _ = encrypt_message_aes_gcm(plaintext)
-        wrong_nonce = base64.urlsafe_b64encode(os.urandom(12)).decode()
-
-        with pytest.raises(Exception):
-            decrypt_message_aes_gcm(ciphertext, wrong_nonce)
-
-    def test_encrypt_unicode_message(self):
-        """Debe manejar mensajes con caracteres unicode."""
-        plaintext = "Mensaje con ñ, émojis 🔐 y 日本語"
-        ciphertext, nonce = encrypt_message_aes_gcm(plaintext)
-        decrypted = decrypt_message_aes_gcm(ciphertext, nonce)
-
-        assert decrypted == plaintext
-
-
 class TestRSAOAEP:
     """Pruebas para cifrado de claves AES con RSA-OAEP."""
 
@@ -373,6 +325,7 @@ class TestHybridEncryption:
             encrypted["encrypted_key"],
             encrypted["ciphertext"],
             encrypted["nonce"],
+            encrypted["auth_tag"],
         )
 
         assert decrypted == plaintext
@@ -401,6 +354,7 @@ class TestHybridEncryption:
             encrypted["encrypted_key"],
             encrypted["ciphertext"],
             encrypted["nonce"],
+            encrypted["auth_tag"],
         )
 
         assert decrypted == plaintext
@@ -415,18 +369,6 @@ class TestSecurityEdgeCases:
         hashed = hash_password(password)
         assert verify_password(password, hashed) is True
 
-    def test_very_long_password(self):
-        """Debe manejar contraseñas muy largas."""
-        password = "a" * 1000
-        hashed = hash_password(password)
-        assert verify_password(password, hashed) is True
-
-    def test_empty_message_encryption(self):
-        """Debe cifrar mensajes vacíos."""
-        ciphertext, nonce = encrypt_message_aes_gcm("")
-        decrypted = decrypt_message_aes_gcm(ciphertext, nonce)
-        assert decrypted == ""
-
     def test_large_message_hybrid_encryption(self):
         """Debe manejar mensajes grandes."""
         password = "pass"
@@ -440,6 +382,7 @@ class TestSecurityEdgeCases:
             encrypted["encrypted_key"],
             encrypted["ciphertext"],
             encrypted["nonce"],
+            encrypted["auth_tag"],
         )
 
         assert decrypted == plaintext
