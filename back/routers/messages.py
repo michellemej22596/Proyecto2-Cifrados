@@ -105,9 +105,9 @@ def create_hybrid_message(
             detail="Contraseña incorrecta. No se puede firmar el mensaje.",
         )
 
-    # 2. Firmar el mensaje usando RSA-PSS (sign_message)
+    # 2. Firmar el mensaje usando ECDSA (sign_message) - Fase 3
     try:
-        signature = DigitalSignatureService.sign_message_rsa(payload.content, sender_private_key)
+        signature = DigitalSignatureService.sign_message(payload.content, sender_private_key.decode('utf-8'))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -240,13 +240,15 @@ def verify_message_authenticity(
     has_signature = message.signature is not None and len(message.signature) > 0
 
     # Verificar si el mensaje está registrado en la blockchain
+    # Mejora: Buscar específicamente si existe algún registro para este par de usuarios
     bc = get_blockchain()
     blockchain_registered = False
     for block in bc.chain[1:]:  # Ignorar genesis
         if (block.sender_id == str(message.sender_id) and 
             block.recipient_id == str(message.recipient_id)):
             blockchain_registered = True
-            break
+            # Nota: No hacemos break aquí para permitir verificación más completa en el futuro
+            # Por ahora solo verificamos existencia, POST hace la verificación completa del hash
 
     # Determinar estado
     if has_signature:
@@ -337,10 +339,10 @@ def verify_message_with_decryption(
             detail="Remitente no encontrado",
         )
 
-    # Verificar la firma digital si existe
+    # Verificar la firma digital si existe usando ECDSA - Fase 3
     signature_valid = False
     if message.signature:
-        signature_valid = DigitalSignatureService.verify_message_signature_rsa(
+        signature_valid = DigitalSignatureService.verify_message_signature(
             plaintext,
             message.signature,
             sender.public_key_pem
@@ -349,7 +351,7 @@ def verify_message_with_decryption(
     # Calcular hash del mensaje descifrado
     message_hash = DigitalSignatureService.calculate_message_hash(plaintext)
 
-    # Verificar en blockchain
+    # Verificar en blockchain - Bug fix: el break ahora solo ocurre cuando se encuentra el hash exacto
     bc = get_blockchain()
     blockchain_registered = False
     hash_matches = False
@@ -360,7 +362,7 @@ def verify_message_with_decryption(
             blockchain_registered = True
             if block.message_hash == message_hash:
                 hash_matches = True
-            break
+                break  # Solo salir cuando encontramos el hash exacto
 
     # Determinar estado de verificación y actualizar en BD
     # Flujo de excepción de Silvia: Si la firma NO coincide -> NO VERIFICADO + alerta
