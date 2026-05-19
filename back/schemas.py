@@ -102,3 +102,24 @@ class GroupMessageDecryptRequest(BaseModel):
 
 class GroupMessageDecryptResponse(BaseModel):
     plaintext: str
+
+
+# ---------------------------------------------------------------------------
+# Message Verification Schemas
+# ---------------------------------------------------------------------------
+
+class MessageVerifyRequest(BaseModel):
+    """Request para verificar autenticidad de un mensaje."""
+    password: str
+
+
+class MessageVerifyResponse(BaseModel):
+    """Response con el resultado de verificacion de un mensaje."""
+    message_id: int
+    is_signature_valid: bool
+    sender_id: int | None = None
+    recipient_id: int | None = None
+    plaintext: str | None = None
+    signature_status: str
+    blockchain_registered: bool = False
+    message: str

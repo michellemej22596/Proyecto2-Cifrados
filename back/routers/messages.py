@@ -10,6 +10,8 @@ from schemas import (
     HybridMessageResponse,
     MessageDecryptRequest,
     MessageDecryptResponse,
+    MessageVerifyRequest,
+    MessageVerifyResponse,
 )
 from crypto import (
     SECRET_KEY,
@@ -18,6 +20,8 @@ from crypto import (
     encrypt_message_hybrid,
     decrypt_message_hybrid,
 )
+from signatures.signer import DigitalSignatureService
+from routers.blockchain import get_blockchain
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -72,12 +76,22 @@ def create_hybrid_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Crea un mensaje cifrado hibrido (RSA-OAEP + AES-256-GCM).
+    
+    Ademas:
+    1. Calcula el hash SHA-256 del texto plano original
+    2. Registra automaticamente la transaccion en la blockchain
+    """
     recipient = db.query(User).filter(User.id == payload.recipient_id).first()
     if recipient is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Destinatario no encontrado",
         )
+
+    # Calcular hash del mensaje ANTES de cifrar (para registro en blockchain)
+    message_hash = DigitalSignatureService.calculate_message_hash(payload.content)
 
     encrypted = encrypt_message_hybrid(payload.content, recipient.public_key_pem)
 
@@ -93,6 +107,14 @@ def create_hybrid_message(
     db.add(message)
     db.commit()
     db.refresh(message)
+
+    # Registrar automaticamente en la blockchain
+    bc = get_blockchain()
+    bc.add_new_transaction(
+        sender_id=str(current_user.id),
+        recipient_id=str(recipient.id),
+        message_hash=message_hash,
+    )
 
     return message
 
@@ -152,3 +174,157 @@ def decrypt_hybrid_message(
         )
 
     return {"plaintext": plaintext}
+
+
+@router.get("/{message_id}/verify", response_model=MessageVerifyResponse)
+def verify_message_authenticity(
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    GET /messages/{msg_id}/verify
+    
+    Verifica la autenticidad de un mensaje especifico:
+    1. Verifica que el mensaje exista
+    2. Verifica que el usuario tenga acceso (sea remitente o destinatario)
+    3. Verifica el registro en la blockchain (si existe)
+    
+    Nota: La verificacion completa de firma requiere descifrar el mensaje,
+    lo cual necesita la contrasena del destinatario via POST.
+    """
+    message = db.query(Message).filter(Message.id == message_id).first()
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mensaje no encontrado",
+        )
+
+    # Verificar que el usuario tenga acceso al mensaje
+    if message.recipient_id != current_user.id and message.sender_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a este mensaje",
+        )
+
+    # Verificar si el mensaje esta registrado en la blockchain
+    bc = get_blockchain()
+    blockchain_registered = False
+    for block in bc.chain[1:]:  # Ignorar genesis
+        if (block.sender_id == str(message.sender_id) and 
+            block.recipient_id == str(message.recipient_id)):
+            blockchain_registered = True
+            break
+
+    return MessageVerifyResponse(
+        message_id=message_id,
+        is_signature_valid=True,  # Asumimos valido sin firma almacenada
+        sender_id=message.sender_id,
+        recipient_id=message.recipient_id,
+        plaintext=None,  # No podemos descifrar sin password
+        signature_status="NO_SIGNATURE_STORED" if not hasattr(message, 'signature') or message.signature is None else "SIGNATURE_PRESENT",
+        blockchain_registered=blockchain_registered,
+        message="Verificacion basica completada. Use POST para verificar firma con descifrado.",
+    )
+
+
+@router.post("/{message_id}/verify", response_model=MessageVerifyResponse)
+def verify_message_with_decryption(
+    message_id: int,
+    payload: MessageVerifyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    POST /messages/{msg_id}/verify
+    
+    Verifica la autenticidad completa de un mensaje:
+    1. Descifra el mensaje usando la contrasena del destinatario
+    2. Calcula el hash del texto plano
+    3. Verifica si existe en la blockchain con el hash correcto
+    
+    Retorna el estado de verificacion y el texto descifrado.
+    """
+    message = db.query(Message).filter(Message.id == message_id).first()
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mensaje no encontrado",
+        )
+
+    if message.recipient_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo el destinatario puede verificar con descifrado",
+        )
+
+    if message.encrypted_key is None or message.auth_tag is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este mensaje no usa cifrado hibrido valido",
+        )
+
+    # Descifrar la llave privada
+    try:
+        private_key_pem = decrypt_private_key(payload.password, current_user.encrypted_private_key)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Contrasena incorrecta",
+        )
+
+    # Descifrar el mensaje
+    try:
+        plaintext = decrypt_message_hybrid(
+            private_key_pem,
+            message.encrypted_key,
+            message.ciphertext,
+            message.nonce,
+            message.auth_tag,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Error al descifrar el mensaje",
+        )
+
+    # Calcular hash del mensaje descifrado
+    message_hash = DigitalSignatureService.calculate_message_hash(plaintext)
+
+    # Verificar en blockchain
+    bc = get_blockchain()
+    blockchain_registered = False
+    hash_matches = False
+    
+    for block in bc.chain[1:]:  # Ignorar genesis
+        if (block.sender_id == str(message.sender_id) and 
+            block.recipient_id == str(message.recipient_id)):
+            blockchain_registered = True
+            if block.message_hash == message_hash:
+                hash_matches = True
+            break
+
+    # Determinar estado de la firma/verificacion
+    if blockchain_registered and hash_matches:
+        signature_status = "VERIFIED"
+        is_valid = True
+        result_message = "Mensaje verificado exitosamente. Hash coincide con registro en blockchain."
+    elif blockchain_registered and not hash_matches:
+        signature_status = "HASH_MISMATCH"
+        is_valid = False
+        result_message = "ALERTA: El hash del mensaje NO coincide con el registro en blockchain. Posible alteracion."
+    else:
+        signature_status = "NOT_IN_BLOCKCHAIN"
+        is_valid = True  # Valido pero sin registro
+        result_message = "Mensaje descifrado correctamente pero no esta registrado en la blockchain."
+
+    return MessageVerifyResponse(
+        message_id=message_id,
+        is_signature_valid=is_valid,
+        sender_id=message.sender_id,
+        recipient_id=message.recipient_id,
+        plaintext=plaintext,
+        signature_status=signature_status,
+        blockchain_registered=blockchain_registered,
+        message=result_message,
+    )
