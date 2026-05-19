@@ -25,6 +25,10 @@ class Message(Base):
     encrypted_key = Column(String, nullable=True)
     nonce = Column(String, nullable=False)
     auth_tag = Column(String, nullable=True)
+    # Campo de firma digital (RSA-PSS o ECDSA) - Base64 encoded
+    signature = Column(String, nullable=True)
+    # Estado de verificación: VERIFIED, NOT_VERIFIED, PENDING
+    verification_status = Column(String, nullable=True, default="PENDING")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Group(Base):
