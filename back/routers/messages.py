@@ -22,7 +22,7 @@ from crypto import (
     decrypt_message_hybrid,
 )
 from signatures.signer import DigitalSignatureService
-from routers.blockchain import get_blockchain
+from blockchain.core import Blockchain
 from services.alerts import AlertService
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -138,8 +138,8 @@ def create_hybrid_message(
     db.refresh(message)
 
     # 6. Registrar automáticamente en la blockchain (add_new_transaction)
-    bc = get_blockchain()
-    bc.add_new_transaction(
+    Blockchain.add_new_transaction(
+        db=db,
         sender_id=str(current_user.id),
         recipient_id=str(recipient.id),
         message_hash=message_hash,
@@ -242,9 +242,9 @@ def verify_message_authenticity(
 
     # Verificar si el mensaje está registrado en la blockchain
     # Mejora: Buscar específicamente si existe algún registro para este par de usuarios
-    bc = get_blockchain()
+    chain = Blockchain.get_full_chain(db)
     blockchain_registered = False
-    for block in bc.chain[1:]:  # Ignorar genesis
+    for block in chain[1:]:  # Ignorar genesis
         if (block.sender_id == str(message.sender_id) and 
             block.recipient_id == str(message.recipient_id)):
             blockchain_registered = True
@@ -353,11 +353,11 @@ def verify_message_with_decryption(
     message_hash = DigitalSignatureService.calculate_message_hash(plaintext)
 
     # Verificar en blockchain - Bug fix: el break ahora solo ocurre cuando se encuentra el hash exacto
-    bc = get_blockchain()
+    chain = Blockchain.get_full_chain(db)
     blockchain_registered = False
     hash_matches = False
     
-    for block in bc.chain[1:]:  # Ignorar genesis
+    for block in chain[1:]:  # Ignorar genesis
         if (block.sender_id == str(message.sender_id) and 
             block.recipient_id == str(message.recipient_id)):
             blockchain_registered = True

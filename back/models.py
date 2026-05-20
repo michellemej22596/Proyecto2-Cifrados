@@ -62,3 +62,16 @@ class GroupMessage(Base):
     ciphertext = Column(String, nullable=False)
     nonce = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class BlockModel(Base):
+    __tablename__ = "blocks"
+
+    index = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(String, nullable=False)
+    sender_id = Column(String, nullable=False)
+    recipient_id = Column(String, nullable=False)
+    message_hash = Column(String(64), nullable=False)
+    previous_hash = Column(String(64), nullable=False)
+    nonce = Column(Integer, nullable=False, default=0)
+    hash = Column(String(64), nullable=False)
