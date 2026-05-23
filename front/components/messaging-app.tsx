@@ -14,21 +14,29 @@ import { MessageSquare, Shield } from "lucide-react";
 type ViewType = "chat" | "groups" | "blockchain" | "alerts";
 
 export function MessagingApp() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [activeView, setActiveView] = useState<ViewType>("chat");
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isLoading && !isAuthenticated) {
       router.push("/");
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, isLoading, router]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-primary">Cargando...</div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-pulse text-primary">Verificando sesion...</div>
+        <div className="animate-pulse text-primary">Redirigiendo...</div>
       </div>
     );
   }

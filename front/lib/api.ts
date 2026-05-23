@@ -107,7 +107,7 @@ class ApiClient {
   }
 
   async getUsers(): Promise<User[]> {
-    const response = await fetch(`${API_BASE}/users/list`, {
+    const response = await fetch(`${API_BASE}/users/`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) return [];
