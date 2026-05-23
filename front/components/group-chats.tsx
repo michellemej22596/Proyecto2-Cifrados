@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { api, Group, User } from "@/lib/api";
+import { api, Group, GroupMessage, User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,12 +25,14 @@ export function GroupChats() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
-  const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
+  const [selectedMemberNames, setSelectedMemberNames] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newMessage, setNewMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
+  const [decryptedMessages, setDecryptedMessages] = useState<Record<number, string>>({});
 
   const loadData = async () => {
     setIsLoading(true);
@@ -52,19 +54,44 @@ export function GroupChats() {
     loadData();
   }, [user?.id]);
 
+  useEffect(() => {
+    if (selectedGroup) {
+      loadGroupMessages(selectedGroup.id);
+    }
+  }, [selectedGroup]);
+
+  const loadGroupMessages = async (groupId: number) => {
+    try {
+      const messages = await api.getGroupMessages(groupId);
+      setGroupMessages(messages);
+    } catch (err) {
+      console.error("Error loading group messages:", err);
+    }
+  };
+
+  const handleDecryptGroupMessage = async (groupId: number, messageId: number) => {
+    if (!password) return;
+    try {
+      const result = await api.decryptGroupMessage(groupId, messageId, password);
+      setDecryptedMessages((prev) => ({ ...prev, [messageId]: result.plaintext }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al descifrar mensaje");
+    }
+  };
+
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newGroupName.trim() || selectedMembers.length === 0) return;
+    if (!newGroupName.trim() || selectedMemberNames.length === 0) return;
 
     setIsCreating(true);
     setError("");
 
     try {
-      await api.createGroup(newGroupName, selectedMembers);
+      await api.createGroup(newGroupName, selectedMemberNames);
       setSuccess("Grupo creado exitosamente");
       setShowCreateModal(false);
       setNewGroupName("");
-      setSelectedMembers([]);
+      setSelectedMemberNames([]);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al crear grupo");
@@ -81,13 +108,10 @@ export function GroupChats() {
     setError("");
 
     try {
-      await api.sendGroupMessage({
-        content: newMessage,
-        group_id: selectedGroup.id,
-        password: password,
-      });
+      await api.sendGroupMessage(selectedGroup.id, newMessage, password);
       setNewMessage("");
       setSuccess("Mensaje enviado al grupo");
+      await loadGroupMessages(selectedGroup.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al enviar mensaje");
     } finally {
@@ -95,11 +119,11 @@ export function GroupChats() {
     }
   };
 
-  const toggleMember = (userId: number) => {
-    setSelectedMembers((prev) =>
-      prev.includes(userId)
-        ? prev.filter((id) => id !== userId)
-        : [...prev, userId]
+  const toggleMember = (userName: string) => {
+    setSelectedMemberNames((prev) =>
+      prev.includes(userName)
+        ? prev.filter((name) => name !== userName)
+        : [...prev, userName]
     );
   };
 
@@ -126,11 +150,11 @@ export function GroupChats() {
               <h2 className="text-lg font-semibold text-foreground">
                 {selectedGroup ? selectedGroup.name : "Grupos"}
               </h2>
-              <p className="text-sm text-muted-foreground">
-                {selectedGroup
-                  ? `${selectedGroup.members?.length || 0} miembros`
-                  : `${groups.length} grupos disponibles`}
-              </p>
+                  <p className="text-sm text-muted-foreground">
+                  {selectedGroup
+                    ? "Chat grupal cifrado"
+                    : `${groups.length} grupos disponibles`}
+                </p>
             </div>
           </div>
           {!selectedGroup && (
@@ -203,7 +227,7 @@ export function GroupChats() {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-foreground truncate">{group.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {group.members?.length || 0} miembros
+                        {group.owner_id === user?.id ? "Tu grupo" : "Miembro"}
                       </p>
                     </div>
                   </div>
@@ -218,30 +242,70 @@ export function GroupChats() {
           <div className="flex-1 flex flex-col">
             {/* Members */}
             <div className="p-4 border-b border-border bg-secondary/30">
-              <p className="text-xs text-muted-foreground mb-2">Miembros del grupo</p>
-              <div className="flex flex-wrap gap-2">
-                {selectedGroup.members?.map((member) => (
-                  <span
-                    key={member.id}
-                    className="px-2 py-1 bg-secondary rounded-full text-xs text-secondary-foreground"
-                  >
-                    {member.name}
-                  </span>
-                ))}
-              </div>
+              <p className="text-xs text-muted-foreground mb-2">Grupo: {selectedGroup.name}</p>
             </div>
 
-            {/* Messages Area (placeholder - would need group messages API) */}
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <Lock className="h-12 w-12 text-muted-foreground/30 mb-4" />
-                <p className="text-muted-foreground">
-                  Envia un mensaje cifrado al grupo
-                </p>
-                <p className="text-sm text-muted-foreground/70">
-                  Todos los miembros podran descifrar el mensaje
-                </p>
-              </div>
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {groupMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <Lock className="h-12 w-12 text-muted-foreground/30 mb-4" />
+                  <p className="text-muted-foreground">
+                    Envia un mensaje cifrado al grupo
+                  </p>
+                  <p className="text-sm text-muted-foreground/70">
+                    Todos los miembros podran descifrar el mensaje
+                  </p>
+                </div>
+              ) : (
+                groupMessages.map((msg) => {
+                  const isOwn = msg.sender_id === user?.id;
+                  const senderUser = users.find((u) => u.id === msg.sender_id);
+                  const isDecrypted = decryptedMessages[msg.id];
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`max-w-[80%] rounded-2xl p-4 ${
+                          isOwn
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-secondary"
+                        }`}
+                      >
+                        {!isOwn && (
+                          <p className="text-xs font-medium mb-1 opacity-70">
+                            {senderUser?.name || `Usuario ${msg.sender_id}`}
+                          </p>
+                        )}
+                        {isDecrypted ? (
+                          <p className="text-sm">{decryptedMessages[msg.id]}</p>
+                        ) : (
+                          <div>
+                            <p className="text-xs font-mono opacity-50 truncate max-w-[200px]">
+                              {msg.ciphertext.substring(0, 30)}...
+                            </p>
+                            <Button
+                              size="sm"
+                              variant={isOwn ? "secondary" : "outline"}
+                              className="mt-2"
+                              onClick={() => handleDecryptGroupMessage(selectedGroup.id, msg.id)}
+                            >
+                              <Lock className="h-3 w-3 mr-1" />
+                              Descifrar
+                            </Button>
+                          </div>
+                        )}
+                        <p className="text-xs opacity-50 mt-2">
+                          {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ""}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
             {/* Message Input */}
@@ -284,7 +348,7 @@ export function GroupChats() {
                 onClick={() => {
                   setShowCreateModal(false);
                   setNewGroupName("");
-                  setSelectedMembers([]);
+                  setSelectedMemberNames([]);
                 }}
                 className="text-muted-foreground hover:text-foreground"
               >
@@ -307,28 +371,28 @@ export function GroupChats() {
 
               <div className="mb-4">
                 <label className="text-sm font-medium text-foreground mb-1.5 block">
-                  Seleccionar miembros ({selectedMembers.length} seleccionados)
+                  Seleccionar miembros ({selectedMemberNames.length} seleccionados)
                 </label>
                 <div className="max-h-48 overflow-y-auto border border-border rounded-xl p-2 space-y-1">
                   {users.map((u) => (
                     <button
                       key={u.id}
                       type="button"
-                      onClick={() => toggleMember(u.id)}
+                      onClick={() => toggleMember(u.name)}
                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-colors ${
-                        selectedMembers.includes(u.id)
+                        selectedMemberNames.includes(u.name)
                           ? "bg-primary/20 border border-primary/30"
                           : "hover:bg-secondary"
                       }`}
                     >
                       <div
                         className={`w-5 h-5 rounded-md border-2 flex items-center justify-center ${
-                          selectedMembers.includes(u.id)
+                          selectedMemberNames.includes(u.name)
                             ? "bg-primary border-primary"
                             : "border-border"
                         }`}
                       >
-                        {selectedMembers.includes(u.id) && (
+                        {selectedMemberNames.includes(u.name) && (
                           <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
                         )}
                       </div>
@@ -348,7 +412,7 @@ export function GroupChats() {
                   onClick={() => {
                     setShowCreateModal(false);
                     setNewGroupName("");
-                    setSelectedMembers([]);
+                    setSelectedMemberNames([]);
                   }}
                   className="flex-1"
                 >
@@ -356,7 +420,7 @@ export function GroupChats() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isCreating || !newGroupName.trim() || selectedMembers.length === 0}
+                  disabled={isCreating || !newGroupName.trim() || selectedMemberNames.length === 0}
                   className="flex-1"
                 >
                   {isCreating ? (

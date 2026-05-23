@@ -1,5 +1,55 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
+// Helper to extract error message from various error response formats
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (!error) return fallback;
+  
+  // If it's a string, return it
+  if (typeof error === 'string') return error;
+  
+  // If it's an object with detail
+  if (typeof error === 'object' && error !== null) {
+    const err = error as Record<string, unknown>;
+    
+    // FastAPI validation errors: {detail: [{msg: "...", loc: [...]}]}
+    if (Array.isArray(err.detail)) {
+      const messages = err.detail.map((d: unknown) => {
+        if (typeof d === 'object' && d !== null) {
+          const detail = d as Record<string, unknown>;
+          return detail.msg || JSON.stringify(d);
+        }
+        return String(d);
+      });
+      return messages.join(', ');
+    }
+    
+    // Simple detail string: {detail: "error message"}
+    if (typeof err.detail === 'string') {
+      return err.detail;
+    }
+    
+    // Nested detail object: {detail: {message: "..."}}
+    if (typeof err.detail === 'object' && err.detail !== null) {
+      const detail = err.detail as Record<string, unknown>;
+      if (typeof detail.message === 'string') return detail.message;
+      if (typeof detail.msg === 'string') return detail.msg;
+      return JSON.stringify(err.detail);
+    }
+    
+    // message field
+    if (typeof err.message === 'string') {
+      return err.message;
+    }
+    
+    // error field
+    if (typeof err.error === 'string') {
+      return err.error;
+    }
+  }
+  
+  return fallback;
+}
+
 export interface User {
   id: number;
   name: string;
@@ -23,8 +73,16 @@ export interface Message {
 export interface Group {
   id: number;
   name: string;
-  creator_id: number;
-  members: User[];
+  owner_id: number;
+}
+
+export interface GroupMessage {
+  id: number;
+  group_id: number;
+  sender_id: number;
+  ciphertext: string;
+  nonce: string;
+  created_at?: string;
 }
 
 export interface BlockchainBlock {
@@ -88,7 +146,7 @@ class ApiClient {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `Error ${response.status}`);
+      throw new Error(extractErrorMessage(error, `Error ${response.status}`));
     }
     return response.json();
   }
@@ -101,7 +159,7 @@ class ApiClient {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || "Credenciales invalidas");
+      throw new Error(extractErrorMessage(error, "Credenciales invalidas"));
     }
     return response.json();
   }
@@ -130,7 +188,7 @@ class ApiClient {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `Error ${response.status}`);
+      throw new Error(extractErrorMessage(error, `Error ${response.status}`));
     }
     return response.json();
   }
@@ -143,7 +201,7 @@ class ApiClient {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `Error ${response.status}`);
+      throw new Error(extractErrorMessage(error, `Error ${response.status}`));
     }
     return response.json();
   }
@@ -156,7 +214,7 @@ class ApiClient {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `Error ${response.status}`);
+      throw new Error(extractErrorMessage(error, `Error ${response.status}`));
     }
     return response.json();
   }
@@ -195,37 +253,50 @@ class ApiClient {
     return response.json();
   }
 
-  async createGroup(name: string, memberIds: number[]): Promise<Group> {
+  async createGroup(name: string, memberNames: string[]): Promise<Group> {
     const response = await fetch(`${API_BASE}/groups/`, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify({ name, member_ids: memberIds }),
+      body: JSON.stringify({ name, member_names: memberNames }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `Error ${response.status}`);
+      throw new Error(extractErrorMessage(error, `Error ${response.status}`));
     }
     return response.json();
   }
 
-  async sendGroupMessage(data: { content: string; group_id: number; password: string }) {
-    const response = await fetch(`${API_BASE}/messages/group/`, {
+  async sendGroupMessage(groupId: number, content: string, password: string): Promise<GroupMessage> {
+    const response = await fetch(`${API_BASE}/groups/${groupId}/messages`, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify({ content, password }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `Error ${response.status}`);
+      throw new Error(extractErrorMessage(error, `Error ${response.status}`));
     }
     return response.json();
   }
 
-  async getGroupMessages(groupId: number): Promise<Message[]> {
-    const response = await fetch(`${API_BASE}/messages/group/${groupId}`, {
+  async getGroupMessages(groupId: number): Promise<GroupMessage[]> {
+    const response = await fetch(`${API_BASE}/groups/${groupId}/messages`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) return [];
+    return response.json();
+  }
+
+  async decryptGroupMessage(groupId: number, messageId: number, password: string): Promise<DecryptedMessage> {
+    const response = await fetch(`${API_BASE}/groups/${groupId}/messages/${messageId}/decrypt`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ password }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(error, `Error ${response.status}`));
+    }
     return response.json();
   }
 }
