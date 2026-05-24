@@ -6,3 +6,4 @@ cryptography==43.0.3
 python-jose[cryptography]==3.3.0
 python-multipart==0.0.12
 pydantic[email]==2.9.2
+pycryptodome
