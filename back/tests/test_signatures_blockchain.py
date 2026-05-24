@@ -7,8 +7,25 @@ import sys
 sys.path.insert(0, '..')
 
 from signatures.signer import DigitalSignatureService
-from blockchain.core import Block, Blockchain
+from blockchain.core import Blockchain
+from models import BlockModel, Base
 from Crypto.PublicKey import ECC
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+
+@pytest.fixture
+def db_session():
+    """Crea una base de datos SQLite en memoria para las pruebas."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False}
+    )
+    Base.metadata.create_all(bind=engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = TestingSessionLocal()
+    yield db
+    db.close()
 
 
 class TestDigitalSignatureService:
@@ -164,179 +181,126 @@ class TestDigitalSignatureService:
         assert is_valid is True
 
 
-class TestBlock:
-    """Pruebas para la clase Block."""
-
-    def test_block_creation(self):
-        """Un bloque debe crearse con todos sus atributos."""
-        block = Block(
-            index=1,
-            timestamp="2024-01-01T00:00:00Z",
-            sender_id="sender-123",
-            recipient_id="recipient-456",
-            message_hash="abc123def456",
-            previous_hash="0" * 64,
-            nonce=0
-        )
-        
-        assert block.index == 1
-        assert block.sender_id == "sender-123"
-        assert block.recipient_id == "recipient-456"
-        assert block.message_hash == "abc123def456"
-        assert block.previous_hash == "0" * 64
-        assert isinstance(block.hash, str)
-        assert len(block.hash) == 64
-
-    def test_block_hash_is_deterministic(self):
-        """El mismo bloque debe producir el mismo hash."""
-        params = {
-            'index': 1,
-            'timestamp': "2024-01-01T00:00:00Z",
-            'sender_id': "sender",
-            'recipient_id': "recipient",
-            'message_hash': "hash123",
-            'previous_hash': "0" * 64,
-            'nonce': 0
-        }
-        
-        block1 = Block(**params)
-        block2 = Block(**params)
-        
-        assert block1.hash == block2.hash
-
-    def test_block_hash_changes_with_data(self):
-        """Cambiar los datos del bloque debe cambiar el hash."""
-        block1 = Block(
-            index=1,
-            timestamp="2024-01-01T00:00:00Z",
-            sender_id="sender",
-            recipient_id="recipient",
-            message_hash="hash123",
-            previous_hash="0" * 64,
-        )
-        
-        block2 = Block(
-            index=1,
-            timestamp="2024-01-01T00:00:00Z",
-            sender_id="sender_diferente",  # Cambiado
-            recipient_id="recipient",
-            message_hash="hash123",
-            previous_hash="0" * 64,
-        )
-        
-        assert block1.hash != block2.hash
-
-
 class TestBlockchain:
-    """Pruebas para la clase Blockchain."""
+    """Pruebas para la clase Blockchain usando SQLite en memoria."""
 
-    def test_blockchain_creates_genesis_block(self):
+    def test_blockchain_creates_genesis_block(self, db_session):
         """La blockchain debe inicializarse con un bloque genesis."""
-        bc = Blockchain()
+        Blockchain.create_genesis_block(db_session)
+        chain = Blockchain.get_full_chain(db_session)
         
-        assert len(bc.chain) == 1
-        genesis = bc.chain[0]
+        assert len(chain) == 1
+        genesis = chain[0]
         assert genesis.index == 0
         assert genesis.previous_hash == "0" * 64
 
-    def test_genesis_block_has_correct_structure(self):
+    def test_genesis_block_has_correct_structure(self, db_session):
         """El bloque genesis debe tener la estructura correcta."""
-        bc = Blockchain()
-        genesis = bc.chain[0]
+        Blockchain.create_genesis_block(db_session)
+        chain = Blockchain.get_full_chain(db_session)
+        genesis = chain[0]
         
         assert genesis.sender_id == "00000000-0000-0000-0000-000000000000"
         assert genesis.recipient_id == "00000000-0000-0000-0000-000000000000"
         assert genesis.message_hash == "0" * 64
 
-    def test_add_new_transaction(self):
+    def test_add_new_transaction(self, db_session):
         """Agregar una transaccion debe crear un nuevo bloque."""
-        bc = Blockchain()
-        initial_length = len(bc.chain)
+        Blockchain.create_genesis_block(db_session)
+        initial_length = len(Blockchain.get_full_chain(db_session))
         
-        new_block = bc.add_new_transaction(
+        new_block = Blockchain.add_new_transaction(
+            db_session,
             sender_id="user-1",
             recipient_id="user-2",
             message_hash="abc123def456"
         )
         
-        assert len(bc.chain) == initial_length + 1
+        assert len(Blockchain.get_full_chain(db_session)) == initial_length + 1
         assert new_block.index == 1
         assert new_block.sender_id == "user-1"
         assert new_block.recipient_id == "user-2"
         assert new_block.message_hash == "abc123def456"
 
-    def test_blocks_are_chained_correctly(self):
+    def test_blocks_are_chained_correctly(self, db_session):
         """Cada bloque nuevo debe apuntar al hash del bloque anterior."""
-        bc = Blockchain()
+        Blockchain.create_genesis_block(db_session)
         
-        bc.add_new_transaction("sender1", "recipient1", "hash1")
-        bc.add_new_transaction("sender2", "recipient2", "hash2")
-        bc.add_new_transaction("sender3", "recipient3", "hash3")
+        Blockchain.add_new_transaction(db_session, "sender1", "recipient1", "hash1")
+        Blockchain.add_new_transaction(db_session, "sender2", "recipient2", "hash2")
+        Blockchain.add_new_transaction(db_session, "sender3", "recipient3", "hash3")
         
-        for i in range(1, len(bc.chain)):
-            current = bc.chain[i]
-            previous = bc.chain[i - 1]
+        chain = Blockchain.get_full_chain(db_session)
+        for i in range(1, len(chain)):
+            current = chain[i]
+            previous = chain[i - 1]
             assert current.previous_hash == previous.hash
 
-    def test_is_chain_valid_returns_true_for_valid_chain(self):
+    def test_is_chain_valid_returns_true_for_valid_chain(self, db_session):
         """Una cadena valida debe retornar True en is_chain_valid."""
-        bc = Blockchain()
-        bc.add_new_transaction("sender1", "recipient1", "hash1")
-        bc.add_new_transaction("sender2", "recipient2", "hash2")
+        Blockchain.create_genesis_block(db_session)
+        Blockchain.add_new_transaction(db_session, "sender1", "recipient1", "hash1")
+        Blockchain.add_new_transaction(db_session, "sender2", "recipient2", "hash2")
         
-        assert bc.is_chain_valid() is True
+        assert Blockchain.is_chain_valid(db_session) is True
 
-    def test_is_chain_valid_detects_tampered_hash(self):
+    def test_is_chain_valid_detects_tampered_hash(self, db_session):
         """Debe detectar si el hash de un bloque fue alterado."""
-        bc = Blockchain()
-        bc.add_new_transaction("sender1", "recipient1", "hash1")
+        Blockchain.create_genesis_block(db_session)
+        Blockchain.add_new_transaction(db_session, "sender1", "recipient1", "hash1")
         
-        # Alterar el hash del bloque 1 (simular ataque)
-        bc.chain[1].hash = "hash_alterado_por_atacante"
+        # Alterar el hash del bloque 1 (simular ataque en DB)
+        block = Blockchain.get_block_by_index(db_session, 1)
+        block.hash = "hash_alterado_por_atacante"
+        db_session.commit()
         
-        assert bc.is_chain_valid() is False
+        assert Blockchain.is_chain_valid(db_session) is False
 
-    def test_is_chain_valid_detects_broken_chain(self):
+    def test_is_chain_valid_detects_broken_chain(self, db_session):
         """Debe detectar si el encadenamiento de hashes fue roto."""
-        bc = Blockchain()
-        bc.add_new_transaction("sender1", "recipient1", "hash1")
-        bc.add_new_transaction("sender2", "recipient2", "hash2")
+        Blockchain.create_genesis_block(db_session)
+        Blockchain.add_new_transaction(db_session, "sender1", "recipient1", "hash1")
+        Blockchain.add_new_transaction(db_session, "sender2", "recipient2", "hash2")
         
-        # Alterar el previous_hash del bloque 2 (romper cadena)
-        bc.chain[2].previous_hash = "previous_hash_incorrecto"
+        # Alterar el previous_hash del bloque 2 (romper cadena en DB)
+        block = Blockchain.get_block_by_index(db_session, 2)
+        block.previous_hash = "previous_hash_incorrecto"
+        db_session.commit()
         
-        assert bc.is_chain_valid() is False
+        assert Blockchain.is_chain_valid(db_session) is False
 
-    def test_get_latest_block(self):
+    def test_get_latest_block(self, db_session):
         """get_latest_block debe retornar el ultimo bloque."""
-        bc = Blockchain()
-        bc.add_new_transaction("sender1", "recipient1", "hash1")
+        Blockchain.create_genesis_block(db_session)
+        Blockchain.add_new_transaction(db_session, "sender1", "recipient1", "hash1")
         
-        latest = bc.get_latest_block()
+        latest = Blockchain.get_latest_block(db_session)
+        chain = Blockchain.get_full_chain(db_session)
         
         assert latest.index == 1
-        assert latest == bc.chain[-1]
+        assert latest.index == chain[-1].index
 
-    def test_multiple_transactions_maintain_integrity(self):
+    def test_multiple_transactions_maintain_integrity(self, db_session):
         """Multiples transacciones deben mantener la integridad de la cadena."""
-        bc = Blockchain()
+        Blockchain.create_genesis_block(db_session)
         
         # Agregar muchas transacciones
         for i in range(10):
-            bc.add_new_transaction(
+            Blockchain.add_new_transaction(
+                db_session,
                 sender_id=f"sender-{i}",
                 recipient_id=f"recipient-{i}",
                 message_hash=f"message-hash-{i}"
             )
         
-        assert len(bc.chain) == 11  # Genesis + 10 transacciones
-        assert bc.is_chain_valid() is True
+        assert len(Blockchain.get_full_chain(db_session)) == 11  # Genesis + 10 transacciones
+        assert Blockchain.is_chain_valid(db_session) is True
 
 
 class TestIntegrationSignaturesAndBlockchain:
     """Pruebas de integracion entre firmas digitales y blockchain."""
 
-    def test_full_message_flow_with_signature_and_blockchain(self):
+    def test_full_message_flow_with_signature_and_blockchain(self, db_session):
         """Simula el flujo completo: firmar mensaje y registrar en blockchain."""
         # Generar llaves ECDSA
         private_key = ECC.generate(curve='P-256')
@@ -354,8 +318,9 @@ class TestIntegrationSignaturesAndBlockchain:
         signature = DigitalSignatureService.sign_message(plaintext, private_pem)
         
         # 4. Registrar en blockchain
-        bc = Blockchain()
-        block = bc.add_new_transaction(
+        Blockchain.create_genesis_block(db_session)
+        block = Blockchain.add_new_transaction(
+            db_session,
             sender_id="funcionario-001",
             recipient_id="director-002",
             message_hash=message_hash
@@ -367,13 +332,13 @@ class TestIntegrationSignaturesAndBlockchain:
         )
         
         # 6. Verificar blockchain
-        is_chain_valid = bc.is_chain_valid()
+        is_chain_valid = Blockchain.is_chain_valid(db_session)
         
         # Assertions
         assert is_signature_valid is True
         assert is_chain_valid is True
         assert block.message_hash == message_hash
-        assert len(bc.chain) == 2  # Genesis + 1 transaccion
+        assert len(Blockchain.get_full_chain(db_session)) == 2  # Genesis + 1 transaccion
 
 
 if __name__ == "__main__":

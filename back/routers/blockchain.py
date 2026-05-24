@@ -2,21 +2,16 @@
 Router para endpoints de la blockchain de auditoria.
 Expone la cadena de bloques y permite verificar su integridad.
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 from typing import List
+
+from sqlalchemy.orm import Session
+from database import get_db
 
 from blockchain.core import Blockchain
 
 router = APIRouter(prefix="/blockchain", tags=["blockchain"])
-
-# Instancia singleton de la blockchain
-blockchain_instance = Blockchain()
-
-
-def get_blockchain() -> Blockchain:
-    """Retorna la instancia singleton de la blockchain."""
-    return blockchain_instance
 
 
 # ---------------------------------------------------------------------------
@@ -53,17 +48,17 @@ class BlockchainVerifyResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/", response_model=BlockchainResponse)
-def get_full_blockchain():
+def get_full_blockchain(db: Session = Depends(get_db)):
     """
     GET /blockchain/
     
     Retorna la cadena completa de bloques en formato JSON.
     Incluye el bloque genesis y todos los bloques de transacciones.
     """
-    bc = get_blockchain()
+    chain = Blockchain.get_full_chain(db)
     
     chain_data = []
-    for block in bc.chain:
+    for block in chain:
         chain_data.append(BlockResponse(
             index=block.index,
             timestamp=block.timestamp,
@@ -76,13 +71,13 @@ def get_full_blockchain():
         ))
     
     return BlockchainResponse(
-        length=len(bc.chain),
+        length=len(chain),
         chain=chain_data,
     )
 
 
 @router.get("/verify", response_model=BlockchainVerifyResponse)
-def verify_blockchain_integrity():
+def verify_blockchain_integrity(db: Session = Depends(get_db)):
     """
     GET /blockchain/verify
     
@@ -92,9 +87,9 @@ def verify_blockchain_integrity():
     
     Retorna el estado de integridad de la blockchain.
     """
-    bc = get_blockchain()
-    is_valid = bc.is_chain_valid()
-    total_blocks = len(bc.chain)
+    is_valid = Blockchain.is_chain_valid(db)
+    chain = Blockchain.get_full_chain(db)
+    total_blocks = len(chain)
     
     if is_valid:
         message = f"La blockchain es valida. {total_blocks} bloques verificados correctamente."
@@ -109,21 +104,20 @@ def verify_blockchain_integrity():
 
 
 @router.get("/block/{block_index}", response_model=BlockResponse)
-def get_block_by_index(block_index: int):
+def get_block_by_index(block_index: int, db: Session = Depends(get_db)):
     """
     GET /blockchain/block/{block_index}
     
     Retorna un bloque especifico por su indice.
     """
-    bc = get_blockchain()
+    block = Blockchain.get_block_by_index(db, block_index)
     
-    if block_index < 0 or block_index >= len(bc.chain):
+    if block is None:
+        chain = Blockchain.get_full_chain(db)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Bloque con indice {block_index} no encontrado. La cadena tiene {len(bc.chain)} bloques.",
+            detail=f"Bloque con indice {block_index} no encontrado. La cadena tiene {len(chain)} bloques.",
         )
-    
-    block = bc.chain[block_index]
     return BlockResponse(
         index=block.index,
         timestamp=block.timestamp,
