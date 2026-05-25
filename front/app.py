@@ -251,7 +251,7 @@ def auth_headers():
 
 def load_users():
     try:
-        response = requests.get(f"{API_BASE}/users/list", timeout=10)
+        response = requests.get(f"{API_BASE}/users/", timeout=10)
         if response.status_code == 200:
             return response.json()
     except Exception:
