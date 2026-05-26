@@ -14,6 +14,8 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key, lo
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+import hashlib
+
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # ---------------------------------------------------------------------------
@@ -101,7 +103,43 @@ def decrypt_private_key(password: str, encrypted_private_key: str) -> bytes:
 # JWT
 # ---------------------------------------------------------------------------
 
-SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
+def _load_or_create_secret_key() -> str:
+    """Carga el SECRET_KEY con la siguiente prioridad:
+    1. Variable de entorno SECRET_KEY (configuración explícita)
+    2. Archivo persistido en el volumen Docker /app/data/.secret_key
+    3. Genera uno nuevo y lo guarda en el archivo para reutilizarlo tras reinicios
+    """
+    # 1. Variable de entorno tiene máxima prioridad
+    env_key = os.getenv("SECRET_KEY")
+    if env_key:
+        return env_key
+
+    # 2. Intentar leer desde archivo persistido en el volumen
+    key_file = Path("/app/data/.secret_key")
+    try:
+        if key_file.exists():
+            stored = key_file.read_text().strip()
+            if stored:
+                return stored
+    except OSError:
+        pass
+
+    # 3. Generar nueva clave y persistirla para sobrevivir reinicios
+    new_key = secrets.token_urlsafe(32)
+    try:
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text(new_key)
+        # Permisos restrictivos: solo el propietario puede leer/escribir
+        key_file.chmod(0o600)
+    except OSError:
+        # Si no se puede persistir (e.g. entorno de desarrollo sin /app/data)
+        # simplemente se usa en memoria — mismo comportamiento que antes
+        pass
+
+    return new_key
+
+
+SECRET_KEY = _load_or_create_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
@@ -232,6 +270,26 @@ def generate_ecdsa_key_pair(password: str) -> tuple[str, str]:
     encrypted_private_key = f"{salt_b64}.{token.decode()}"
     
     return public_key_pem, encrypted_private_key
+
+
+# ---------------------------------------------------------------------------
+# MFA — cifrado del secreto TOTP con clave derivada del SECRET_KEY del servidor
+# ---------------------------------------------------------------------------
+
+def _get_mfa_fernet() -> Fernet:
+    """Fernet cuya clave se deriva del SECRET_KEY del servidor (SHA-256 → base64url)."""
+    raw = hashlib.sha256(SECRET_KEY.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(raw))
+
+
+def encrypt_mfa_secret(secret: str) -> str:
+    """Cifra el secreto TOTP antes de guardarlo en la BD."""
+    return _get_mfa_fernet().encrypt(secret.encode()).decode()
+
+
+def decrypt_mfa_secret(encrypted: str) -> str:
+    """Descifra el secreto TOTP almacenado en la BD."""
+    return _get_mfa_fernet().decrypt(encrypted.encode()).decode()
 
 
 def decrypt_ecdsa_private_key(password: str, encrypted_private_key: str) -> bytes:

@@ -105,6 +105,47 @@ class Blockchain:
         return new_block
         
     @staticmethod
+    def find_transaction(
+        db: Session,
+        message_hash: str,
+        sender_id: str,
+        recipient_id: str,
+    ) -> "Optional[BlockModel]":
+        """
+        Busca en O(1) el bloque que corresponde EXACTAMENTE a una transacción
+        individual: hash del mensaje + remitente + destinatario.
+
+        Usar en lugar de iterar get_full_chain() para validar un mensaje concreto.
+        Devuelve el BlockModel si existe, None si no.
+        """
+        Blockchain.create_genesis_block(db)
+        return (
+            db.query(BlockModel)
+            .filter(
+                BlockModel.message_hash == message_hash,
+                BlockModel.sender_id == sender_id,
+                BlockModel.recipient_id == recipient_id,
+            )
+            .first()
+        )
+
+    @staticmethod
+    def has_any_transaction(db: Session, sender_id: str, recipient_id: str) -> bool:
+        """
+        Devuelve True si existe al menos un bloque del par remitente/destinatario.
+        Se usa para distinguir 'sin registro' de 'hash no coincide' en la verificación.
+        """
+        Blockchain.create_genesis_block(db)
+        return (
+            db.query(BlockModel)
+            .filter(
+                BlockModel.sender_id == sender_id,
+                BlockModel.recipient_id == recipient_id,
+            )
+            .first()
+        ) is not None
+
+    @staticmethod
     def is_chain_valid(db: Session) -> bool:
         """
         Recorre secuencialmente toda la cadena verificando su integridad.

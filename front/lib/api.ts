@@ -110,6 +110,25 @@ export interface DecryptedMessage {
   plaintext: string;
 }
 
+// ---- MFA ----
+
+export interface LoginResult {
+  access_token?: string;
+  mfa_session_token?: string;
+  token_type: string;
+  mfa_required: boolean;
+}
+
+export interface MfaStatus {
+  mfa_enabled: boolean;
+}
+
+export interface MfaSetupData {
+  secret: string;
+  uri: string;
+  qr_code: string; // data:image/png;base64,...
+}
+
 export interface VerificationResult {
   message_id: number;
   sender_id: number;
@@ -151,7 +170,7 @@ class ApiClient {
     return response.json();
   }
 
-  async login(email: string, password: string) {
+  async login(email: string, password: string): Promise<LoginResult> {
     const response = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -160,6 +179,66 @@ class ApiClient {
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       throw new Error(extractErrorMessage(error, "Credenciales invalidas"));
+    }
+    return response.json();
+  }
+
+  // ---- MFA ----
+
+  async verifyMfa(mfaSessionToken: string, otpCode: string): Promise<LoginResult> {
+    const response = await fetch(`${API_BASE}/auth/mfa/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mfa_session_token: mfaSessionToken, otp_code: otpCode }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(error, "Código MFA inválido"));
+    }
+    return response.json();
+  }
+
+  async getMfaStatus(): Promise<MfaStatus> {
+    const response = await fetch(`${API_BASE}/auth/mfa/status`, {
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) return { mfa_enabled: false };
+    return response.json();
+  }
+
+  async setupMfa(): Promise<MfaSetupData> {
+    const response = await fetch(`${API_BASE}/auth/mfa/setup`, {
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(error, "Error al configurar MFA"));
+    }
+    return response.json();
+  }
+
+  async enableMfa(otpCode: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_BASE}/auth/mfa/enable`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ otp_code: otpCode }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(error, "Error al activar MFA"));
+    }
+    return response.json();
+  }
+
+  async disableMfa(otpCode: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_BASE}/auth/mfa/disable`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ otp_code: otpCode }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(error, "Error al desactivar MFA"));
     }
     return response.json();
   }

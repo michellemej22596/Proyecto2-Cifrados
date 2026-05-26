@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { api, User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { MfaSetupModal } from "@/components/mfa-setup";
 import { Input } from "@/components/ui/input";
 import { 
   Search, 
@@ -34,6 +35,7 @@ export function ContactList({ selectedUserId, onSelectUser, onNavigate, activeVi
   const [alertCount, setAlertCount] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isHoveringLogout, setIsHoveringLogout] = useState(false);
+  const [showMfaModal, setShowMfaModal] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -143,7 +145,11 @@ export function ContactList({ selectedUserId, onSelectUser, onNavigate, activeVi
                   <span>En linea</span>
                 </div>
               </div>
-              <button className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+              <button
+                onClick={() => setShowMfaModal(true)}
+                title="Configurar autenticación de dos factores"
+                className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+              >
                 <Settings className="h-4 w-4" />
               </button>
             </div>
@@ -295,6 +301,9 @@ export function ContactList({ selectedUserId, onSelectUser, onNavigate, activeVi
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
+
+      {/* MFA Setup Modal */}
+      <MfaSetupModal isOpen={showMfaModal} onClose={() => setShowMfaModal(false)} />
     </>
   );
 }

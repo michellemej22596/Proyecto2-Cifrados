@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, User, Message, DecryptedMessage } from "@/lib/api";
+import { useWebSocket } from "@/hooks/use-websocket";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,15 +18,6 @@ import {
   AlertCircle,
   CheckCircle2,
   X,
-  MoreVertical,
-  Phone,
-  Video,
-  Info,
-  Smile,
-  Paperclip,
-  Mic,
-  Check,
-  CheckCheck,
 } from "lucide-react";
 
 interface ConversationMessage extends Message {
@@ -43,7 +35,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
-  const { password } = useAuth();
+  const { password, token } = useAuth();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -52,7 +44,6 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [modalPassword, setModalPassword] = useState("");
   const [decryptingMessageId, setDecryptingMessageId] = useState<number | null>(null);
-  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -60,18 +51,21 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // ------------------------------------------------------------------
+  // Carga inicial de mensajes — solo los que el usuario actual recibió
+  // (el backend ya filtra por recipient_id == current_user.id)
+  // ------------------------------------------------------------------
   const loadMessages = async () => {
     try {
       setIsLoading(true);
       const allMessages = await api.getMessages();
-      
-      const conversationMessages = allMessages.filter(
-        (msg) =>
-          (msg.sender_id === currentUserId && msg.recipient_id === selectedUser.id) ||
-          (msg.sender_id === selectedUser.id && msg.recipient_id === currentUserId)
-      );
-      
-      conversationMessages.sort((a, b) => a.id - b.id);
+
+      // El backend devuelve solo mensajes donde soy destinatario.
+      // Filtrar por el remitente con quien estoy chateando.
+      const conversationMessages = allMessages
+        .filter((msg) => msg.sender_id === selectedUser.id)
+        .sort((a, b) => a.id - b.id);
+
       setMessages(conversationMessages);
     } catch (err) {
       console.error("Error loading messages:", err);
@@ -80,10 +74,9 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
     }
   };
 
+  // Carga al montar / cambiar de contacto — SIN intervalo
   useEffect(() => {
     loadMessages();
-    const interval = setInterval(loadMessages, 5000);
-    return () => clearInterval(interval);
   }, [selectedUser.id, currentUserId]);
 
   useEffect(() => {
@@ -94,6 +87,35 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
     inputRef.current?.focus();
   }, [selectedUser.id]);
 
+  // ------------------------------------------------------------------
+  // WebSocket — recibe mensajes nuevos en tiempo real
+  // ------------------------------------------------------------------
+  const handleWsMessage = useCallback(
+    (raw: unknown) => {
+      const payload = raw as { event?: string; message?: Message };
+      if (payload.event !== "new_message" || !payload.message) return;
+
+      const msg = payload.message;
+
+      // Solo añadir si el mensaje viene del contacto seleccionado
+      // y yo soy el destinatario (doble check, el backend ya lo garantiza)
+      if (msg.sender_id !== selectedUser.id || msg.recipient_id !== currentUserId) return;
+
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev; // evitar duplicados
+        return [...prev, msg].sort((a, b) => a.id - b.id);
+      });
+
+      setTimeout(scrollToBottom, 80);
+    },
+    [selectedUser.id, currentUserId]
+  );
+
+  useWebSocket(currentUserId, token, handleWsMessage);
+
+  // ------------------------------------------------------------------
+  // Enviar mensaje
+  // ------------------------------------------------------------------
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !password) return;
@@ -102,13 +124,19 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
     setError("");
 
     try {
+      const content = newMessage;
+      setNewMessage(""); // limpiar input de inmediato
+
       await api.sendMessage({
-        content: newMessage,
+        content,
         recipient_id: selectedUser.id,
         password: password,
       });
-      setNewMessage("");
-      await loadMessages();
+
+      // No llamamos loadMessages() — el mensaje fue cifrado con la llave
+      // pública del destinatario; nosotros (remitente) no podemos descifrarlo,
+      // así que no lo mostramos en nuestra vista.
+      // El destinatario lo recibe en tiempo real por WebSocket.
       inputRef.current?.focus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al enviar mensaje");
@@ -117,6 +145,9 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
     }
   };
 
+  // ------------------------------------------------------------------
+  // Descifrar / Verificar
+  // ------------------------------------------------------------------
   const handleDecrypt = async (messageId: number, pwd?: string) => {
     const passwordToUse = pwd || password;
     if (!passwordToUse) {
@@ -189,29 +220,24 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
     }
   };
 
+  // ------------------------------------------------------------------
+  // Helpers de presentación
+  // ------------------------------------------------------------------
   const getVerificationIcon = (msg: ConversationMessage) => {
     if (msg.verificationResult) {
-      if (msg.verificationResult.is_signature_valid) {
-        return <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />;
-      }
-      return <ShieldAlert className="h-3.5 w-3.5 text-destructive" />;
+      return msg.verificationResult.is_signature_valid
+        ? <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+        : <ShieldAlert className="h-3.5 w-3.5 text-destructive" />;
     }
-    
     switch (msg.verification_status) {
-      case "VERIFIED":
-        return <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />;
-      case "NOT_VERIFIED":
-        return <ShieldAlert className="h-3.5 w-3.5 text-destructive" />;
-      default:
-        return <ShieldQuestion className="h-3.5 w-3.5 text-amber-500" />;
+      case "VERIFIED":    return <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />;
+      case "NOT_VERIFIED": return <ShieldAlert className="h-3.5 w-3.5 text-destructive" />;
+      default:            return <ShieldQuestion className="h-3.5 w-3.5 text-amber-500" />;
     }
   };
 
-  const isSentByMe = (msg: Message) => msg.sender_id === currentUserId;
-
-  const getInitials = (name: string) => {
-    return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
-  };
+  const getInitials = (name: string) =>
+    name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 
   const getAvatarColor = (name: string) => {
     const colors = [
@@ -221,23 +247,36 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
       "from-rose-500 to-pink-500",
       "from-amber-500 to-orange-500",
     ];
-    const index = name.charCodeAt(0) % colors.length;
-    return colors[index];
+    return colors[name.charCodeAt(0) % colors.length];
   };
 
-  const formatTime = (index: number) => {
+  const formatTime = (msg: ConversationMessage, index: number) => {
+    if (msg.created_at) {
+      return new Date(msg.created_at).toLocaleTimeString("es", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    // Fallback estimado si no hay timestamp
     const now = new Date();
     const offset = (messages.length - index - 1) * 2;
-    const time = new Date(now.getTime() - offset * 60000);
-    return time.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+    return new Date(now.getTime() - offset * 60_000).toLocaleTimeString("es", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
+  // ------------------------------------------------------------------
+  // Render
+  // ------------------------------------------------------------------
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-background to-secondary/5">
       {/* Chat Header */}
       <div className="px-4 lg:px-6 py-4 border-b border-border bg-card/80 backdrop-blur-sm flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-4">
-          <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${getAvatarColor(selectedUser.name)} flex items-center justify-center text-white font-semibold shadow-lg`}>
+          <div
+            className={`w-11 h-11 rounded-xl bg-gradient-to-br ${getAvatarColor(selectedUser.name)} flex items-center justify-center text-white font-semibold shadow-lg`}
+          >
             {getInitials(selectedUser.name)}
           </div>
           <div>
@@ -256,22 +295,14 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground rounded-xl h-10 w-10">
-            <Phone className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground rounded-xl h-10 w-10">
-            <Video className="h-4 w-4" />
-          </Button>
           <Button
             variant="ghost"
             size="icon"
             onClick={loadMessages}
+            title="Recargar mensajes"
             className="text-muted-foreground hover:text-foreground rounded-xl h-10 w-10"
           >
             <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          </Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground rounded-xl h-10 w-10">
-            <MoreVertical className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -283,8 +314,8 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
             <AlertCircle className="h-4 w-4" />
             {error}
           </div>
-          <button 
-            onClick={() => setError("")} 
+          <button
+            onClick={() => setError("")}
             className="text-destructive hover:text-destructive/80 p-1 hover:bg-destructive/10 rounded transition-colors"
           >
             <X className="h-4 w-4" />
@@ -309,8 +340,8 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
                 Chat Cifrado
               </h3>
               <p className="text-muted-foreground text-sm max-w-xs mb-4">
-                Inicia una conversacion segura con {selectedUser.name}. 
-                Todos los mensajes estan protegidos con cifrado de extremo a extremo.
+                Aún no has recibido mensajes de {selectedUser.name}.
+                Los mensajes que te envíen aparecerán aquí en tiempo real.
               </p>
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground bg-secondary/50 px-3 py-2 rounded-lg">
                 <Lock className="h-3.5 w-3.5 text-primary" />
@@ -321,55 +352,48 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
         ) : (
           <>
             {messages.map((msg, index) => (
+              // Todos los mensajes aquí son RECIBIDOS (yo soy destinatario)
+              // → se muestran a la izquierda con opción de descifrar
               <div
                 key={msg.id}
-                className={`flex ${isSentByMe(msg) ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+                className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300"
                 style={{ animationDelay: `${index * 30}ms` }}
               >
-                <div className={`max-w-[80%] lg:max-w-[65%] ${isSentByMe(msg) ? "" : "flex gap-3"}`}>
-                  {/* Avatar for received messages */}
-                  {!isSentByMe(msg) && (
-                    <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${getAvatarColor(selectedUser.name)} flex items-center justify-center text-white text-xs font-semibold shrink-0 mt-1`}>
-                      {getInitials(selectedUser.name)}
-                    </div>
-                  )}
-                  
+                <div className="max-w-[80%] lg:max-w-[65%] flex gap-3">
+                  {/* Avatar del remitente */}
                   <div
-                    className={`rounded-2xl px-4 py-3 shadow-sm ${
-                      isSentByMe(msg)
-                        ? "bg-primary text-primary-foreground rounded-br-md"
-                        : "bg-card border border-border text-card-foreground rounded-bl-md"
-                    }`}
+                    className={`w-8 h-8 rounded-lg bg-gradient-to-br ${getAvatarColor(selectedUser.name)} flex items-center justify-center text-white text-xs font-semibold shrink-0 mt-1`}
                   >
-                    {/* Message Content */}
+                    {getInitials(selectedUser.name)}
+                  </div>
+
+                  <div className="rounded-2xl px-4 py-3 shadow-sm bg-card border border-border text-card-foreground rounded-bl-md">
+                    {/* Contenido */}
                     {msg.decryptedContent ? (
                       <div className="space-y-2">
                         <p className="break-words leading-relaxed">{msg.decryptedContent}</p>
-                        <div className={`flex items-center justify-between gap-3 text-xs ${isSentByMe(msg) ? "opacity-70" : "text-muted-foreground"}`}>
+                        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
                           <div className="flex items-center gap-1.5">
                             <Unlock className="h-3 w-3" />
                             <span>Descifrado</span>
                             {getVerificationIcon(msg)}
                           </div>
-                          <div className="flex items-center gap-1">
-                            <span>{formatTime(index)}</span>
-                            {isSentByMe(msg) && <CheckCheck className="h-3.5 w-3.5" />}
-                          </div>
+                          <span>{formatTime(msg, index)}</span>
                         </div>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className={`flex items-center gap-2 text-sm ${isSentByMe(msg) ? "opacity-80" : "text-muted-foreground"}`}>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <Lock className="h-4 w-4" />
                           <span>Mensaje cifrado</span>
                         </div>
-                        <div className={`font-mono text-xs ${isSentByMe(msg) ? "opacity-50" : "text-muted-foreground/70"} truncate max-w-[220px] bg-black/10 px-2 py-1 rounded`}>
+                        <div className="font-mono text-xs text-muted-foreground/70 truncate max-w-[220px] bg-black/10 px-2 py-1 rounded">
                           {msg.ciphertext.substring(0, 32)}...
                         </div>
                         <div className="flex gap-2">
                           <Button
                             size="sm"
-                            variant={isSentByMe(msg) ? "secondary" : "outline"}
+                            variant="outline"
                             onClick={() => handleDecrypt(msg.id)}
                             disabled={msg.isDecrypting}
                             className="text-xs h-8 rounded-lg"
@@ -386,22 +410,20 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
                               </>
                             )}
                           </Button>
-                          {!isSentByMe(msg) && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleVerify(msg.id)}
-                              className="text-xs h-8 rounded-lg"
-                            >
-                              <Shield className="h-3 w-3 mr-1.5" />
-                              Verificar
-                            </Button>
-                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleVerify(msg.id)}
+                            className="text-xs h-8 rounded-lg"
+                          >
+                            <Shield className="h-3 w-3 mr-1.5" />
+                            Verificar
+                          </Button>
                         </div>
                       </div>
                     )}
 
-                    {/* Verification Result */}
+                    {/* Resultado de verificación */}
                     {msg.verificationResult && (
                       <div
                         className={`mt-3 p-2.5 rounded-lg text-xs ${
@@ -435,18 +457,6 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
                 </div>
               </div>
             ))}
-            
-            {/* Typing indicator */}
-            {isTyping && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                </div>
-                <span>{selectedUser.name} esta escribiendo...</span>
-              </div>
-            )}
           </>
         )}
         <div ref={messagesEndRef} />
@@ -455,26 +465,18 @@ export function ChatView({ selectedUser, currentUserId }: ChatViewProps) {
       {/* Message Input */}
       <div className="p-4 lg:p-6 border-t border-border bg-card/80 backdrop-blur-sm">
         <form onSubmit={handleSendMessage} className="flex items-end gap-3">
-          <div className="flex-1 relative">
+          <div className="flex-1">
             <Input
               ref={inputRef}
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               placeholder="Escribe un mensaje cifrado..."
-              className="h-12 pr-24 bg-input border-border rounded-xl focus:ring-2 focus:ring-primary/20 transition-all"
+              className="h-12 bg-input border-border rounded-xl focus:ring-2 focus:ring-primary/20 transition-all"
               disabled={isSending}
             />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              <button type="button" className="p-2 text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-secondary">
-                <Smile className="h-5 w-5" />
-              </button>
-              <button type="button" className="p-2 text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-secondary">
-                <Paperclip className="h-5 w-5" />
-              </button>
-            </div>
           </div>
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             disabled={isSending || !newMessage.trim()}
             className="h-12 w-12 rounded-xl shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all"
           >

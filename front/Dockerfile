@@ -1,14 +1,31 @@
-FROM python:3.11-slim
+# ---- Build stage ----
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY package.json package-lock.json ./
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN npm ci
 
 COPY . .
 
-EXPOSE 8501
+RUN npm run build
 
-CMD ["streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+# ---- Production stage ----
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Copy only what Next.js needs to run
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+EXPOSE 3000
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["node", "server.js"]

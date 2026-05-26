@@ -126,3 +126,45 @@ class MessageVerifyResponse(BaseModel):
     signature_status: str
     blockchain_registered: bool = False
     message: str
+
+
+# ---------------------------------------------------------------------------
+# MFA Schemas
+# ---------------------------------------------------------------------------
+
+class LoginResponse(BaseModel):
+    """
+    Respuesta al POST /auth/login.
+    - Login sin MFA   → access_token presente, mfa_required=False
+    - Login con MFA   → mfa_session_token presente, mfa_required=True
+    """
+    access_token: str | None = None
+    mfa_session_token: str | None = None
+    token_type: str
+    mfa_required: bool = False
+
+
+class MfaStatusResponse(BaseModel):
+    mfa_enabled: bool
+
+
+class MfaSetupResponse(BaseModel):
+    """Datos que necesita el cliente para configurar su app autenticadora."""
+    secret: str           # Base32 — para entrada manual en la app
+    uri: str              # otpauth://totp/... — para QR
+    qr_code: str          # data:image/png;base64,... — imagen lista para <img>
+
+
+class MfaOtpRequest(BaseModel):
+    """Petición que solo lleva un código OTP de 6 dígitos."""
+    otp_code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class MfaVerifyRequest(BaseModel):
+    """Segunda fase del login cuando MFA está activo."""
+    mfa_session_token: str
+    otp_code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class MfaMessageResponse(BaseModel):
+    message: str

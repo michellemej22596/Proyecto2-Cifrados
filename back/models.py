@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from database import Base
 
@@ -17,6 +17,9 @@ class User(Base):
     # Llaves ECDSA P-256 para firmas digitales
     ecdsa_public_key_pem = Column(String, nullable=True)
     encrypted_ecdsa_private_key = Column(String, nullable=True)
+    # MFA — TOTP (Google Authenticator, Authy, etc.)
+    mfa_secret = Column(String, nullable=True)       # secreto TOTP cifrado con clave del servidor
+    mfa_enabled = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Message(Base):
