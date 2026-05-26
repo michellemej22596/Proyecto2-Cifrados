@@ -6,24 +6,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
-import { 
-  Shield, 
-  Lock, 
-  KeyRound, 
-  AlertCircle, 
-  CheckCircle2, 
-  ArrowLeft, 
-  Mail, 
-  User, 
-  Eye, 
+import {
+  Shield,
+  Lock,
+  KeyRound,
+  AlertCircle,
+  CheckCircle2,
+  ArrowLeft,
+  Mail,
+  User,
+  Eye,
   EyeOff,
   Sparkles,
   ShieldCheck,
   Fingerprint,
-  Link2
+  Link2,
+  Smartphone,
 } from "lucide-react";
 
-type AuthMode = "login" | "register";
+type AuthMode = "login" | "register" | "mfa";
 
 export function AuthForm() {
   const [mode, setMode] = useState<AuthMode>("login");
@@ -43,7 +44,11 @@ export function AuthForm() {
     public_key_pem: string;
   } | null>(null);
 
-  const { login } = useAuth();
+  // MFA segundo factor
+  const [mfaSessionToken, setMfaSessionToken] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+
+  const { login, completeMfaLogin } = useAuth();
   const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -52,10 +57,35 @@ export function AuthForm() {
     setError("");
 
     try {
-      await login(email, password);
-      router.push("/chat");
+      const outcome = await login(email, password);
+      if (!outcome.mfaRequired) {
+        router.push("/chat");
+      } else {
+        // Necesita código TOTP → cambiar al paso MFA
+        setMfaSessionToken(outcome.mfaSessionToken);
+        setOtpCode("");
+        setMode("mfa");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al iniciar sesion");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otpCode.length !== 6) {
+      setError("El código debe tener 6 dígitos");
+      return;
+    }
+    setIsLoading(true);
+    setError("");
+    try {
+      await completeMfaLogin(mfaSessionToken, otpCode, password);
+      router.push("/chat");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Código MFA inválido");
     } finally {
       setIsLoading(false);
     }
@@ -312,6 +342,70 @@ export function AuthForm() {
                     </span>
                   )}
                 </Button>
+              </form>
+            )}
+
+            {/* MFA Step */}
+            {mode === "mfa" && (
+              <form onSubmit={handleMfaSubmit} className="space-y-5">
+                <div className="text-center mb-2">
+                  <div className="inline-flex p-3 bg-primary/10 rounded-2xl mb-3">
+                    <Smartphone className="h-8 w-8 text-primary" />
+                  </div>
+                  <h3 className="font-semibold text-foreground text-lg">
+                    Verificación en dos pasos
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Ingresa el código de 6 dígitos de tu app autenticadora
+                    (Google Authenticator, Authy, etc.)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                    <Lock className="h-4 w-4 text-muted-foreground" />
+                    Código OTP
+                  </label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d{6}"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    required
+                    autoFocus
+                    className="h-14 text-center text-2xl tracking-[0.5em] font-mono bg-input border-border focus:ring-2 focus:ring-primary/20 transition-all"
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full h-12 text-base font-medium shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all"
+                  disabled={isLoading || otpCode.length !== 6}
+                >
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <div className="h-5 w-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                      Verificando...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5" />
+                      Verificar código
+                    </span>
+                  )}
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={() => { setMode("login"); setError(""); setOtpCode(""); }}
+                  className="w-full flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-2"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Volver al inicio de sesión
+                </button>
               </form>
             )}
 

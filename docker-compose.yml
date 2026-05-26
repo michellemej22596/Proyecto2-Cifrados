@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   back:
-    build: 
+    build:
       context: ./back
       dockerfile: Dockerfile
     container_name: cifrados_back
@@ -15,14 +15,14 @@ services:
     restart: unless-stopped
 
   front:
-    build: 
+    build:
       context: ./front
       dockerfile: Dockerfile
     container_name: cifrados_front
     ports:
-      - "8501:8501"
+      - "3000:3000"
     environment:
-      - API_BASE_URL=http://back:8000
+      - NEXT_PUBLIC_API_BASE_URL=http://back:8000
     depends_on:
       - back
     restart: unless-stopped

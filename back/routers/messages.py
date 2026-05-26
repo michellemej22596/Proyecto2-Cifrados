@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
@@ -24,10 +24,23 @@ from crypto import (
 from signatures.signer import DigitalSignatureService
 from blockchain.core import Blockchain
 from services.alerts import AlertService
+from ws_manager import manager
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+# ---------------------------------------------------------------------------
+# Helper async: notifica al destinatario por WebSocket
+# Se usa como BackgroundTask para no bloquear la respuesta HTTP
+# ---------------------------------------------------------------------------
+
+async def _notify_recipient_ws(recipient_id: int, message_data: dict) -> None:
+    await manager.send_to_user(recipient_id, {
+        "event": "new_message",
+        "message": message_data,
+    })
 
 
 def get_current_user(
@@ -62,12 +75,14 @@ def get_hybrid_messages(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Devuelve SOLO los mensajes donde el usuario autenticado es el DESTINATARIO.
+    El remitente no puede descifrar sus propios mensajes (cifrados con la llave
+    pública del destinatario), por lo que mostrarlos carece de sentido.
+    """
     return (
         db.query(Message)
-        .filter(
-            (Message.recipient_id == current_user.id)
-            | (Message.sender_id == current_user.id)
-        )
+        .filter(Message.recipient_id == current_user.id)
         .all()
     )
 
@@ -75,6 +90,7 @@ def get_hybrid_messages(
 @router.post("/hybrid/", response_model=HybridMessageResponse, status_code=status.HTTP_201_CREATED)
 def create_hybrid_message(
     payload: HybridMessageCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -144,6 +160,21 @@ def create_hybrid_message(
         recipient_id=str(recipient.id),
         message_hash=message_hash,
     )
+
+    # 7. Notificar al destinatario en tiempo real via WebSocket (si está conectado)
+    message_data = {
+        "id": message.id,
+        "sender_id": message.sender_id,
+        "recipient_id": message.recipient_id,
+        "ciphertext": message.ciphertext,
+        "nonce": message.nonce,
+        "auth_tag": message.auth_tag,
+        "encrypted_key": message.encrypted_key,
+        "signature": message.signature,
+        "verification_status": message.verification_status,
+        "created_at": message.created_at.isoformat() if message.created_at else None,
+    }
+    background_tasks.add_task(_notify_recipient_ws, recipient.id, message_data)
 
     return message
 
@@ -238,35 +269,35 @@ def verify_message_authenticity(
         )
 
     # Verificar si el mensaje tiene firma almacenada
-    has_signature = message.signature is not None and len(message.signature) > 0
+    has_signature = bool(message.signature)
 
-    # Verificar si el mensaje está registrado en la blockchain
-    # Mejora: Buscar específicamente si existe algún registro para este par de usuarios
-    chain = Blockchain.get_full_chain(db)
-    blockchain_registered = False
-    for block in chain[1:]:  # Ignorar genesis
-        if (block.sender_id == str(message.sender_id) and 
-            block.recipient_id == str(message.recipient_id)):
-            blockchain_registered = True
-            # Nota: No hacemos break aquí para permitir verificación más completa en el futuro
-            # Por ahora solo verificamos existencia, POST hace la verificación completa del hash
+    # Sin el plaintext (requiere contraseña) no podemos calcular el hash exacto.
+    # Solo confirmamos si el par remitente/destinatario tiene alguna transacción en blockchain.
+    any_in_chain = Blockchain.has_any_transaction(
+        db,
+        sender_id=str(message.sender_id),
+        recipient_id=str(message.recipient_id),
+    )
 
     # Determinar estado
     if has_signature:
         signature_status = "SIGNATURE_PRESENT"
-        status_message = "Firma digital presente. Use POST para verificar con descifrado completo."
+        status_message = (
+            "Firma digital presente. "
+            "Usa el botón Verificar (con contraseña) para confirmar firma + hash en blockchain."
+        )
     else:
         signature_status = "NO_SIGNATURE_STORED"
         status_message = "ADVERTENCIA: Este mensaje no tiene firma digital almacenada."
 
     return MessageVerifyResponse(
         message_id=message_id,
-        is_signature_valid=has_signature,  # Parcialmente válido si tiene firma
+        is_signature_valid=has_signature,
         sender_id=message.sender_id,
         recipient_id=message.recipient_id,
-        plaintext=None,  # No podemos descifrar sin password
+        plaintext=None,
         signature_status=signature_status,
-        blockchain_registered=blockchain_registered,
+        blockchain_registered=any_in_chain,
         message=status_message,
     )
 
@@ -349,71 +380,98 @@ def verify_message_with_decryption(
             sender.ecdsa_public_key_pem  # Usar llave pública ECDSA del remitente
         )
 
-    # Calcular hash del mensaje descifrado
+    # ---------------------------------------------------------------------------
+    # Calcular hash SHA-256 del texto plano (igual al almacenado al enviar)
+    # ---------------------------------------------------------------------------
     message_hash = DigitalSignatureService.calculate_message_hash(plaintext)
 
-    # Verificar en blockchain - Bug fix: el break ahora solo ocurre cuando se encuentra el hash exacto
-    chain = Blockchain.get_full_chain(db)
-    blockchain_registered = False
-    hash_matches = False
-    
-    for block in chain[1:]:  # Ignorar genesis
-        if (block.sender_id == str(message.sender_id) and 
-            block.recipient_id == str(message.recipient_id)):
-            blockchain_registered = True
-            if block.message_hash == message_hash:
-                hash_matches = True
-                break  # Solo salir cuando encontramos el hash exacto
+    # ---------------------------------------------------------------------------
+    # Verificar en blockchain — query directa por hash + sender + recipient
+    # Esto valida la transacción INDIVIDUAL de este mensaje, no cualquier
+    # transacción del mismo par de usuarios.
+    # ---------------------------------------------------------------------------
+    block_found = Blockchain.find_transaction(
+        db,
+        message_hash=message_hash,
+        sender_id=str(message.sender_id),
+        recipient_id=str(message.recipient_id),
+    )
+    message_in_blockchain = block_found is not None
 
+    # Si el hash exacto no está, verificamos si hay CUALQUIER transacción del par
+    # para distinguir "mensaje adulterado" de "blockchain nunca registró este mensaje".
+    any_from_pair = message_in_blockchain or Blockchain.has_any_transaction(
+        db,
+        sender_id=str(message.sender_id),
+        recipient_id=str(message.recipient_id),
+    )
+
+    # ---------------------------------------------------------------------------
     # Determinar estado de verificación y actualizar en BD
-    # Flujo de excepción de Silvia: Si la firma NO coincide -> NO VERIFICADO + alerta
+    # ---------------------------------------------------------------------------
     if not message.signature:
+        # Sin firma — no se puede verificar autenticidad
         signature_status = "NO_SIGNATURE"
         is_valid = False
         message.verification_status = "NOT_VERIFIED"
         result_message = "ALERTA: El mensaje no tiene firma digital. No se puede verificar autenticidad."
-        # Disparar alerta de seguridad
         AlertService.create_no_signature_alert(
             message_id=message_id,
             sender_id=message.sender_id,
             recipient_id=message.recipient_id,
         )
+
     elif not signature_valid:
-        # ⚠️ ALERTA AL USUARIO: Firma digital no coincide
+        # Firma presente pero matemáticamente inválida
         signature_status = "SIGNATURE_INVALID"
         is_valid = False
         message.verification_status = "NOT_VERIFIED"
-        result_message = "⚠️ ALERTA DE SEGURIDAD: La firma digital NO COINCIDE. El mensaje puede haber sido alterado o el remitente no es quien dice ser. NO CONFÍE en este mensaje."
-        # Disparar alerta crítica de seguridad (flujo de excepción de Silvia)
+        result_message = (
+            "⚠️ ALERTA DE SEGURIDAD: La firma digital NO COINCIDE. "
+            "El mensaje puede haber sido alterado o el remitente no es quien dice ser."
+        )
         AlertService.create_signature_invalid_alert(
             message_id=message_id,
             sender_id=message.sender_id,
             recipient_id=message.recipient_id,
         )
-    elif blockchain_registered and hash_matches:
+
+    elif message_in_blockchain:
+        # Firma válida + hash exacto de este mensaje encontrado en blockchain → VERIFICADO
         signature_status = "VERIFIED"
         is_valid = True
         message.verification_status = "VERIFIED"
-        result_message = "✓ Mensaje verificado exitosamente. Firma válida y hash coincide con registro en blockchain."
-    elif blockchain_registered and not hash_matches:
+        result_message = (
+            f"✓ Mensaje #{message_id} verificado. "
+            f"Firma ECDSA válida y hash SHA-256 coincide con bloque #{block_found.index} en blockchain."
+        )
+
+    elif any_from_pair:
+        # Firma válida pero el hash de ESTE mensaje no está en blockchain
+        # → probable adulteración del contenido después del envío
         signature_status = "HASH_MISMATCH"
         is_valid = False
         message.verification_status = "NOT_VERIFIED"
-        result_message = "⚠️ ALERTA: El hash del mensaje NO coincide con el registro en blockchain. Posible alteración del contenido."
-        # Disparar alerta de hash mismatch
+        result_message = (
+            "⚠️ ALERTA: Firma válida pero el hash SHA-256 de este mensaje "
+            "NO coincide con ningún bloque en blockchain. Posible adulteración del contenido."
+        )
         AlertService.create_hash_mismatch_alert(
             message_id=message_id,
             sender_id=message.sender_id,
             recipient_id=message.recipient_id,
         )
+
     else:
-        # Firma válida pero no está en blockchain
+        # Firma válida pero sin ningún registro en blockchain para este par
         signature_status = "SIGNATURE_VALID_NO_BLOCKCHAIN"
         is_valid = True
         message.verification_status = "VERIFIED"
-        result_message = "✓ Firma digital verificada correctamente. Nota: Mensaje no encontrado en blockchain."
+        result_message = (
+            "✓ Firma digital ECDSA verificada. "
+            "Nota: No se encontró registro de este par en blockchain."
+        )
 
-    # Guardar el estado de verificación actualizado
     db.commit()
 
     return MessageVerifyResponse(
@@ -423,7 +481,7 @@ def verify_message_with_decryption(
         recipient_id=message.recipient_id,
         plaintext=plaintext,
         signature_status=signature_status,
-        blockchain_registered=blockchain_registered,
+        blockchain_registered=message_in_blockchain,   # True solo si ESTE mensaje está en blockchain
         message=result_message,
     )
 
