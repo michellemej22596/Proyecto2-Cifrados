@@ -2,6 +2,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from jose import jwt, JWTError
 from sqlalchemy import text, inspect
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from database import engine, Base
 from routers import auth, users, messages, groups, blockchain
@@ -49,6 +51,11 @@ app = FastAPI(
     description="Registro de usuarios con hashing de contraseñas y llaves RSA-2048.",
     version="0.1.0",
 )
+
+# SlowAPI: registra el limitador global y devuelve HTTP 429 cuando se excede
+# el número de solicitudes permitido.
+app.state.limiter = auth.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ---------------------------------------------------------------------------

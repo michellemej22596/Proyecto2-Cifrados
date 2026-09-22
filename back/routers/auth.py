@@ -3,11 +3,13 @@ import io
 
 import pyotp
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from database import get_db
 from models import User
@@ -36,6 +38,9 @@ from crypto import (
 from datetime import timedelta
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Rate limiter por dirección IP para proteger endpoints sensibles.
+limiter = Limiter(key_func=get_remote_address)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -132,7 +137,12 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(
+    payload: UserLogin,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """
     Primer factor de autenticación.
 
