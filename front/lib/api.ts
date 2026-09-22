@@ -309,20 +309,35 @@ class ApiClient {
   }
 
   async getBlockchain(): Promise<{ chain: BlockchainBlock[]; length: number }> {
-    const response = await fetch(`${API_BASE}/blockchain/`);
-    if (!response.ok) {
-      return { chain: [], length: 0 };
-    }
-    return response.json();
+  const response = await fetch(`${API_BASE}/blockchain/`, {
+    headers: this.getHeaders(),
+  });
+
+  if (!response.ok) {
+    return { chain: [], length: 0 };
   }
 
-  async verifyBlockchain(): Promise<{ is_valid: boolean; total_blocks: number; message: string }> {
-    const response = await fetch(`${API_BASE}/blockchain/verify`);
-    if (!response.ok) {
-      throw new Error("Error al verificar blockchain");
-    }
-    return response.json();
+  return response.json();
+}
+
+async verifyBlockchain(): Promise<{
+  is_valid: boolean;
+  total_blocks: number;
+  message: string;
+}> {
+  const response = await fetch(`${API_BASE}/blockchain/verify`, {
+    headers: this.getHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(
+      extractErrorMessage(error, "Error al verificar blockchain")
+    );
   }
+
+  return response.json();
+}
 
   async getGroups(): Promise<Group[]> {
     const response = await fetch(`${API_BASE}/groups/`, {
