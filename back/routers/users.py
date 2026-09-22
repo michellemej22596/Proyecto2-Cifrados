@@ -4,17 +4,25 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 from schemas import PublicKeyResponse, UserResponse
+from routers.auth import get_current_user
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.get("/", response_model=list[UserResponse])
-def get_users(db: Session = Depends(get_db)):
+def get_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return db.query(User).all()
 
 
 @router.get("/{user_id}/key", response_model=PublicKeyResponse)
-def get_public_key(user_id: int, db: Session = Depends(get_db)):
+def get_public_key(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
