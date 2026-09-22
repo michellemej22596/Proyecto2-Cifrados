@@ -8,6 +8,7 @@ from routers import auth, users, messages, groups, blockchain
 from ws_manager import manager
 from crypto import SECRET_KEY, ALGORITHM
 
+
 # ---------------------------------------------------------------------------
 # Crear / actualizar esquema de BD
 # ---------------------------------------------------------------------------
@@ -38,6 +39,7 @@ def _run_migrations() -> None:
 
 _run_migrations()
 
+
 # ---------------------------------------------------------------------------
 # Aplicación FastAPI
 # ---------------------------------------------------------------------------
@@ -48,12 +50,24 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
+
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -85,29 +99,32 @@ async def websocket_endpoint(
     Una vez conectado, el servidor puede enviar eventos JSON al cliente
     (ej. new_message) sin que el cliente tenga que hacer polling.
     """
-    # 1. Validar el JWT
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        # Rechazar tokens de sesión MFA (no son tokens de acceso completo)
+
         if payload.get("type") == "mfa_session":
             await websocket.close(code=4001)
             return
+
         token_user_id = int(payload.get("sub", -1))
+
         if token_user_id != user_id:
             await websocket.close(code=4001)
             return
+
     except (JWTError, ValueError):
         await websocket.close(code=4001)
         return
 
-    # 2. Registrar la conexión
     await manager.connect(websocket, user_id)
 
     try:
-        # 3. Mantener la conexión viva; el cliente puede enviar "ping"
         while True:
             data = await websocket.receive_text()
+
             if data == "ping":
                 await websocket.send_text("pong")
+
     except WebSocketDisconnect:
         manager.disconnect(user_id)
